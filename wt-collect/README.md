@@ -56,6 +56,14 @@ All ship/naval info is removed in the receiver ingest path before writing (recei
   Counters per session in guard.json, /api/status `clock_guard`, status page, analyzer report. Stored records get recv_ms.
 - Test: test/clock-test.sh <label> <faketime skew> <linux|wine> (outage + 3.6 s link delay via mock/delayproxy.py --delay-file).
 
+## 0.2.2: uniform pings
+
+- Pings are not distinguished by owner. Collector default buttons = original 9 + one `ping` (标点), replacing the 4 buttons of 0.2.1.
+- Receiver `ev:"ping"` has one uniform shape: `id, t, t_end (= t + ttl_ms), ttl_ms (30 s display policy), grid, area, x, y,
+  precision (grid | none), kind, text, source` + optional `meta {sender, own, sender_role, sender_track, sender_xy, sender_cell, ...}`
+  that nothing branches on. `/api/status.allies.recent_pings` lists active pings without any owner fields; location calls and
+  point_of_interest markers moved to `recent_calls`. Package `dist/wt-collector-win64.zip` (0.2.2), previous `dist/wt-collector-win64-0.2.1.zip`.
+
 ## 0.2.1: squadmates + map pings (标点)
 
 - `common/src/mapobj.rs`: shared map_obj classifier. Side: own (`Player` #faC81E, or #043FFF blink 2), squad (#67D756 ground / #39D921 air),

@@ -3,7 +3,8 @@
 category:
   ping      注意战术地图 / 注意该坐标位置 / 注意当前标识区域: target = grid cell (sender is elsewhere; confirmed:
             0/10 ping grids equal the sender's own cell, 9/9 ground location calls do). Own pings carry no grid
-            -> location unknown (precision "none"), only time + own position.
+            -> location unknown (precision "none"). All pings are emitted in ONE uniform shape (to_dict): owner /
+            role / sender position live only under "meta" and are never used to style or filter a ping.
   location  请求掩护 / 需要支援 / 掩护我 / 请求指示空袭目标 ...: grid = sender's cell; exact sender_xy from the blink.
   radio     other quick chat (谢谢 / 装填中 / 空袭警报 / 进攻 X 点 ...): sender position only.
   signal    a #043FFF blink without any chat message in the window (owner known only as track/role).
@@ -54,9 +55,17 @@ class MapPing:
                 self.ttl_ms = s.dur_ms or 0
         return self
 
+    PING_KEYS = ("id", "t_ms", "grid", "area", "x", "y", "precision", "ttl_ms", "kind", "text", "source")
+
     def to_dict(self):
         d = asdict(self.resolve())
         d.pop("_sig", None)
+        if self.category == "ping":
+            # pings are uniform: owner (self / squad / ally) is optional metadata only; nothing branches on it
+            core = {k: d.pop(k) for k in self.PING_KEYS}
+            d.pop("category")
+            core = dict(ev="ping", **core, t_end_ms=core["t_ms"] + core["ttl_ms"], meta=d)
+            return core
         return d
 
 

@@ -1,4 +1,4 @@
-//! Native window (egui/eframe, OpenGL) with data-labeling buttons. 0.2.0 (0.2.1: squad / ping buttons).
+//! Native window (egui/eframe, OpenGL) with data-labeling buttons. 0.2.0 (0.2.2: one 标点 ping button).
 //! Collection runs on the tokio runtime in the background; the window only reads shared state and
 //! queues label events (Shared::add_label). All UI text is Simplified Chinese.
 use crate::labels::{self, LabelDef};

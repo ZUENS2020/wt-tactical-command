@@ -49,7 +49,10 @@ map_info：valid=false 7438；陆战 hud_type 1，grid_steps 140/150/170/200/225
 
 **局限**：陆战中切到飞机视图或在大地图边缘时，算出的格子可能越界（见过 `Z1`、`AE4`、`C32`）。标点位置一律以聊天中的网格为准。
 
-## 4. 数据模型（receiver `markers.jsonl` 和 `/api/markers`，`/api/status` 的 `allies`）
+## 4. 数据模型
+
+> **0.2.2 起（用户决定）：标点统一处理，不区分是谁打的。**`ev:"ping"` 只有一种结构：`id, t, t_end, ttl_ms, grid, area, x, y, precision, kind, text, source`。发送者、own、sender_role、sender_xy 等只放在可选的 `meta` 里，显示和过滤都不使用。`/api/status.allies.recent_pings` 不含任何发送者字段，位置呼叫和 point_of_interest 改放到 `recent_calls`。采集器默认按钮改为原有 9 个加 1 个「标点」（id `ping`）。下文 §5 中按发送者区分的按钮已作废。
+（receiver `markers.jsonl` 和 `/api/markers`，`/api/status` 的 `allies`）
 
 - `ev:"squad"`：小队轨迹，含 track、type、icon、x、y、t0、t1，以及 name（如果聊天中出现）。
 - `ev:"signal_start"/"signal_end"`：track、role（self/squad/ally）、icon、xy、cell、dur_ms、msg_ids。

@@ -41,11 +41,8 @@ pub fn default_labels() -> Vec<LabelDef> {
         d("enemy_icon", "敌机/敌人出现在地图上", "#6a1b9a"),
         d("kill", "击毁", "#37474f"),
         d("died", "阵亡", "#212121"),
-        // 0.2.1: squadmates + map pings (标点) ground truth
-        d("i_pinged", "我打了标点", "#f9a825"),
-        d("team_pinged", "队友标点", "#1565c0"),
-        d("squad_pinged", "小队队友标点", "#558b2f"),
-        d("squad_near", "小队成员在附近", "#00695c"),
+        // 0.2.2: one uniform map-ping (标点) button, whoever placed it
+        d("ping", "标点", "#f9a825"),
         LabelDef { id: NOTE_ID.into(), text: "自定义备注".into(), color: Some("#455a64".into()), note: true },
     ]
 }
@@ -351,12 +348,11 @@ mod tests {
     #[test]
     fn defaults_are_valid_and_chinese() {
         let d = resolve_labels(None).unwrap();
-        assert_eq!(d.len(), 13);
+        assert_eq!(d.len(), 10);
         assert_eq!(d[0].text, "我侦察到敌人");
         assert_eq!(d[7].id, "died");
-        assert_eq!(d[8].text, "我打了标点");
-        assert_eq!(d[11].id, "squad_near");
-        assert!(d[12].note);
+        assert_eq!((d[8].id.as_str(), d[8].text.as_str()), ("ping", "标点"));
+        assert!(d[9].note);
         assert_eq!(resolve_labels(Some(vec![])).unwrap(), d);
     }
 
@@ -396,7 +392,7 @@ note = true
         assert!(l[1].note);
         // missing section -> defaults
         let f: F = toml::from_str("server = 'x'").unwrap_or(F { labels: None });
-        assert_eq!(resolve_labels(f.labels).unwrap().len(), 13);
+        assert_eq!(resolve_labels(f.labels).unwrap().len(), 10);
         // errors
         let bad = |s: &str| resolve_labels(toml::from_str::<F>(s).unwrap().labels).unwrap_err();
         assert!(bad("[[labels]]\nid='a b'\ntext='x'").contains("无效"));

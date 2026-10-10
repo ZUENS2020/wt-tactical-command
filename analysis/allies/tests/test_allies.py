@@ -148,6 +148,11 @@ class RealFixtures(unittest.TestCase):
         own = [p for p in P.values() if p.own and p.category == "ping"]
         self.assertEqual(len(own), 1)
         self.assertEqual((own[0].sender_role, own[0].precision, own[0].grid), ("self", "none", None))
+        # uniform ping shape: own and teammate pings expose the same top-level keys, owner only under meta
+        ko, kt = set(own[0].to_dict()), set(pings[0].to_dict())
+        self.assertEqual(ko, kt)
+        self.assertEqual(own[0].to_dict()["ev"], "ping")
+        self.assertFalse({"own", "sender", "sender_role"} & ko)
         self.assertIsNotNone(own[0].sender_xy)
         self.assertTrue(4800 <= own[0].signal_ms <= 5000)
         # pings / signals never become units: no map_marker objects in RB data, and no ping track

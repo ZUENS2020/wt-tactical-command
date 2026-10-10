@@ -406,6 +406,17 @@ impl Markers {
             if role == "squad" {
                 *self.squad_names.entry(m.sender.clone()).or_default() += 1;
             }
+            if cat == "ping" {
+                // pings are uniform: who placed it (self / squad / ally) is optional metadata only, never branched on
+                let v = json!({"ev": "ping", "id": format!("p{}", m.id), "t": t_msg, "t_end": t_msg + PING_TTL_MS, "ttl_ms": PING_TTL_MS,
+                    "grid": m.grid, "area": area, "x": xy.map(|p| p.0), "y": xy.map(|p| p.1), "precision": precision,
+                    "kind": m.kind, "text": m.text, "source": if sig.is_some() { "chat+map" } else { "chat" },
+                    "meta": {"msg_id": m.id, "sender": m.sender, "own": m.own, "sender_role": role, "sender_track": sig.as_ref().map(|s| s.track),
+                        "sig": sig.as_ref().map(|s| s.id), "sender_xy": sig.as_ref().map(|s| [s.x, s.y]), "sender_icon": sig.as_ref().map(|s| s.icon.clone()),
+                        "sender_cell": sig.as_ref().and_then(|s| g.and_then(|gi| gi.cell_of(s.x, s.y))), "grid_color": m.grid_color, "mode": m.mode}});
+                self.emit(v);
+                continue;
+            }
             let v = json!({"ev": cat, "t": t_msg, "msg_id": m.id, "kind": m.kind, "sender": m.sender, "own": m.own,
                 "sender_role": role, "sender_track": sig.as_ref().map(|s| s.track), "sig": sig.as_ref().map(|s| s.id),
                 "sender_xy": sig.as_ref().map(|s| [s.x, s.y]), "sender_icon": sig.as_ref().map(|s| s.icon.clone()),
@@ -443,8 +454,16 @@ impl Markers {
             .map(|t| json!({"track": t.id, "role": t.role(), "type": t.ty, "icon": t.icon, "x": t.x, "y": t.y, "signal": t.signal_now, "spectated": t.spectated}))
             .collect();
         let horizon = now_t.max(self.last_t) - PING_TTL_MS;
-        let pings: Vec<&Value> = self.recent.iter().filter(|v| matches!(v["ev"].as_str(), Some("ping") | Some("location") | Some("map_marker")) && v["t"].as_i64().unwrap_or(0) >= horizon).collect();
-        json!({"squad_and_signalling": units, "recent_pings": pings, "allies_tracked": self.tracks.iter().filter(|t| t.role() == "ally").count(),
+        // all pings look the same on the map (no owner/role in the live view)
+        let pings: Vec<Value> = self
+            .recent
+            .iter()
+            .filter(|v| v["ev"] == "ping" && v["t_end"].as_i64().unwrap_or(0) >= now_t.max(self.last_t))
+            .map(|v| json!({"id": v["id"], "t": v["t"], "t_end": v["t_end"], "ttl_ms": v["ttl_ms"], "grid": v["grid"], "area": v["area"],
+                "x": v["x"], "y": v["y"], "precision": v["precision"], "kind": v["kind"]}))
+            .collect();
+        let calls: Vec<&Value> = self.recent.iter().filter(|v| matches!(v["ev"].as_str(), Some("location") | Some("map_marker")) && v["t"].as_i64().unwrap_or(0) >= horizon).collect();
+        json!({"squad_and_signalling": units, "recent_pings": pings, "recent_calls": calls, "allies_tracked": self.tracks.iter().filter(|t| t.role() == "ally").count(),
             "squad_names": self.squad_names, "counts": self.counts, "spectating": self.tracks.iter().any(|t| t.spectated && self.last_t - t.last_seen <= LOST_MS)})
     }
 }
@@ -481,8 +500,9 @@ mod tests {
         let ev = |k: &str| m.out.iter().filter(|v| v["ev"] == k).cloned().collect::<Vec<_>>();
         assert_eq!(ev("squad").len(), 1);
         let p = &ev("ping")[0];
-        assert_eq!(p["sender_role"], "squad");
+        assert_eq!(p["meta"]["sender_role"], "squad");
         assert_eq!(p["grid"], "D4");
+        assert_eq!(p["t_end"].as_i64().unwrap() - p["t"].as_i64().unwrap(), PING_TTL_MS);
         assert_eq!(p["precision"], "grid");
         assert_eq!(p["source"], "chat+map");
         assert!(p["area"].is_array());
@@ -510,8 +530,15 @@ mod tests {
         }
         m.flush(i64::MAX / 2, true);
         let p = m.out.iter().find(|v| v["ev"] == "ping").unwrap();
-        assert_eq!((p["own"].as_bool(), p["sender_role"].as_str(), p["precision"].as_str()), (Some(true), Some("self"), Some("none")));
-        assert!(p["sender_xy"].is_array());
+        assert_eq!((p["meta"]["own"].as_bool(), p["meta"]["sender_role"].as_str(), p["precision"].as_str()), (Some(true), Some("self"), Some("none")));
+        assert!(p["meta"]["sender_xy"].is_array());
+        // uniform shape: own ping has exactly the same top-level keys as a teammate ping
+        let keys: std::collections::BTreeSet<&str> = p.as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        let want: std::collections::BTreeSet<&str> = ["area", "ev", "grid", "id", "kind", "meta", "precision", "source", "t", "t_end", "text", "ttl_ms", "x", "y"].into_iter().collect();
+        assert_eq!(keys, want);
+        let live = m.live(1000);
+        let lp = &live["recent_pings"][0];
+        assert!(lp.get("meta").is_none() && lp.get("own").is_none() && lp["precision"] == "none");
         let mk: Vec<_> = m.out.iter().filter(|v| v["ev"] == "map_marker").collect();
         assert_eq!(mk.len(), 2);
         assert_eq!(mk[1]["lifetime_ms"], 900);

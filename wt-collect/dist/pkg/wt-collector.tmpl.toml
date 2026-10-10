@@ -72,26 +72,11 @@ id = "died"
 text = "阵亡"
 color = "#212121"
 
-# 0.2.1：小队成员 / 标点（地图标记）真值
+# 0.2.2：地图标点（不区分谁打的）
 [[labels]]
-id = "i_pinged"
-text = "我打了标点"
+id = "ping"
+text = "标点"
 color = "#f9a825"
-
-[[labels]]
-id = "team_pinged"
-text = "队友标点"
-color = "#1565c0"
-
-[[labels]]
-id = "squad_pinged"
-text = "小队队友标点"
-color = "#558b2f"
-
-[[labels]]
-id = "squad_near"
-text = "小队成员在附近"
-color = "#00695c"
 
 [[labels]]
 id = "note"
