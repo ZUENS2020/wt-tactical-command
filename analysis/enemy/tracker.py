@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import math
 
 from .model import Contact, Frame, MapInfo, MapObj, Observation, HudEvent
-from .classify import is_trackable_enemy, icon_class, find_player
+from .classify import is_trackable_enemy, icon_class, find_player, is_own_spawn
 from .geo import to_world, heading_from_dir, rel, compass
 from . import reveal
 
@@ -44,6 +44,7 @@ class EnemyTracker:
         self.hud: List[HudEvent] = []
         self.player: Optional[MapObj] = None
         self.now_ms: int = 0
+        self.own_bases: List[Tuple[float, float]] = []   # world xy of our respawn_base_* points
         self.player_seen_ms: Optional[int] = None   # last frame with our own (alive) Player icon
         self._next_id = 1
 
@@ -59,6 +60,7 @@ class EnemyTracker:
         self.hud.append(ev)
 
     def reset(self):
+        self.own_bases = []
         self.closed.extend(self.contacts.values())
         self.contacts.clear()
         self.hud.clear()
@@ -72,6 +74,9 @@ class EnemyTracker:
         p = find_player(frame.objects)
         if p is not None:
             self.player, self.player_seen_ms = p, frame.t_ms
+        bases = [to_world(mi, o.x, o.y) for o in frame.objects if is_own_spawn(o)]
+        if bases:                       # static; keep the last list when a frame omits them
+            self.own_bases = bases
         dets = [o for o in frame.objects if is_trackable_enemy(o)]
         self._associate(dets, frame.t_ms)
         self._age(frame.t_ms)
@@ -163,6 +168,12 @@ class EnemyTracker:
         c.wx, c.wy = to_world(mi, o.x, o.y)
         c.heading_deg = heading_from_dir(o.dx, o.dy)
         c.last_seen_ms = t_ms
+        if self.own_bases:
+            d = min(math.hypot(c.wx - bx, c.wy - by) for bx, by in self.own_bases)
+            c.spawn_dist_m = d
+            if c.spawn_dist_first_m is None:
+                c.spawn_dist_first_m = d
+            c.spawn_dist_max_m = d if c.spawn_dist_max_m is None else max(c.spawn_dist_max_m, d)
         c.n_obs += 1
         c.stale = False
         c.age_ms = 0

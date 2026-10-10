@@ -269,13 +269,17 @@ class TestRBLabelledBattle(unittest.TestCase):
             self.assertTrue(reveal.is_live_tracked(c))          # not frozen, not periodic
             self.assertGreater(c.n_pos_changes / c.n_obs, 0.9)
             self.assertEqual({bl for _, bl, _ in c.blink_seq}, {0})
-        self.assertEqual(spaa.end_reason, "timeout")
-        self.assertEqual(spaa.reveal_kind, "unknown"); self.assertTrue(spaa.reveal_rule.startswith("R6"))
+        self.assertEqual(spaa.end_reason, "left_spawn_zone")
+        self.assertEqual(spaa.reveal_kind, "spawn_proximity"); self.assertTrue(spaa.reveal_rule.startswith("R7"))
+        self.assertAlmostEqual(spaa.spawn_dist_first_m, 150, delta=5)
+        self.assertAlmostEqual(spaa.spawn_dist_m, 152, delta=5)        # vanished on the way out
         self.assertEqual(kv1.end_reason, "killed")
+        self.assertAlmostEqual(kv1.spawn_dist_first_m, 152, delta=5)
+        self.assertLess(kv1.spawn_dist_m, 140)                          # killed inside the zone
         kill = [e for e in huds if e.id == kv1.end_hud_id][0]
         self.assertIn("(KV-1)", kill.msg); self.assertFalse(kill.involves_player)
         self.assertLess(abs(kill.t_ms - kv1.last_seen_ms), 500)
-        self.assertEqual(kv1.reveal_kind, "hit_revealed"); self.assertTrue(kv1.reveal_rule.startswith("R2k"))
+        self.assertEqual(kv1.reveal_kind, "spawn_proximity")
 
     def test_no_markers_at_own_hits_kills_or_scout_labels(self):
         for n in ("scout_labels_death", "kill_labels", "hitonly_gen35"):
@@ -331,6 +335,29 @@ class TestRBOwnScoutAndHit(unittest.TestCase):
         self.assertAlmostEqual((k.t_ms - self.labels["i_scouted"]) / 1000, 48.3, delta=0.6)
         self.assertTrue(1000 <= self.labels["kill"] - k.t_ms <= 2500)
         self.assertFalse([e for e in self.huds if e.kind in ("scout_award", "scout_kill")])
+
+
+class TestRBSpawnProximity(unittest.TestCase):
+    """Session 1709 gen 28 (4096 m map): an enemy MediumTank shown 3x, each time entering and leaving
+    ~230-250 m of our nearest respawn_base_tank point (blue)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tr, *_ = run(load_fx("rb_1709_red_mediumtank_spawn.jsonl.gz"))
+        cls.cs = [c for c in cls.tr.all_contacts() if c.n_obs > 5]
+
+    def test_three_segments_enter_and_leave_zone(self):
+        self.assertEqual([c.icon for c in self.cs], ["MediumTank"] * 3)
+        for c in self.cs:
+            self.assertEqual(c.reveal_kind, "spawn_proximity", c.reveal_rule)
+            self.assertTrue(225 <= c.spawn_dist_first_m <= 250, c.spawn_dist_first_m)
+            self.assertLessEqual(c.spawn_dist_max_m, 250)
+            self.assertEqual(c.end_reason, "left_spawn_zone")
+
+    def test_own_spawn_colour(self):
+        from enemy.classify import is_own_spawn
+        self.assertTrue(is_own_spawn(obj("none", type_="respawn_base_tank", color="#174DFF", rgb=(23, 77, 255))))
+        self.assertFalse(is_own_spawn(obj("none", type_="respawn_base_tank")))
 
 
 if __name__ == "__main__":

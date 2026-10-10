@@ -9,6 +9,8 @@ Sources for the timing priors:
 Observed in our data (test drive only): ground targets #fa0C00/blink0 static; the same
 targets toggle to #f00C00/blink2 and back; enemy aircraft always #f00C00/blink2.
 
+reveal_kind values: scouted | hit_revealed | spawn_proximity | visible_static | unknown.
+
 RB ground evidence (2026-10-10, sessions 1709 + df9b with GUI labels, ~6 battles):
   * only ONE enemy variant ever appears in a real battle: ground_model #fa0C00 blink 0, no dx/dy;
     #f00C00 / blink 2 never (0 obs) -> test-drive/AI-only.
@@ -63,6 +65,8 @@ def _scout_kill_near_end(c, tr):
     return None
 
 
+SPAWN_REVEAL_MAX_M = 300   # observed trigger radius 150-250 m (map dependent); first fix must be inside
+SPAWN_EXIT_SLACK_M = 15    # "left the zone": last fix within this of the track's max spawn distance
 KILL_PRE_MS = 1000      # kill line may be polled slightly before the marker disappears
 KILL_POST_MS = 1500     # hudmsg 2 Hz + receive jitter
 LIVE_RATIO = 0.6        # share of polls with a new position
@@ -88,6 +92,10 @@ def end_reason(c, tr):
             return
     if not c.end_reason:
         c.end_reason = "timeout"
+    if (c.end_reason == "timeout" and c.spawn_dist_m is not None and c.spawn_dist_max_m is not None
+            and c.spawn_dist_first_m is not None and c.spawn_dist_first_m <= SPAWN_REVEAL_MAX_M
+            and c.spawn_dist_max_m - c.spawn_dist_m <= SPAWN_EXIT_SLACK_M):
+        c.end_reason = "left_spawn_zone"
 
 
 def _kill_at_end(c, tr):
@@ -114,6 +122,10 @@ def classify(c, tr, final: bool = False):
         _set(c, "scouted", f"R1s vanished within 1.5 s of hudmsg scout award '{sk.kind}' id={sk.id} (scouted target destroyed)", 0.75)
         return
     live = is_live_tracked(c)
+    if live and c.spawn_dist_first_m is not None and c.spawn_dist_first_m <= SPAWN_REVEAL_MAX_M:
+        _set(c, "spawn_proximity", f"R7 live marker appeared {c.spawn_dist_first_m:.0f} m from our respawn base "
+                                   f"(<= {SPAWN_REVEAL_MAX_M} m; spawn-camping reveal, 5/5 RB segments 2026-10-10)", 0.8)
+        return
     kv = _kill_at_end(c, tr) if c.end_reason == "killed" else None
     if kv is not None and live and not kv.involves_player:
         _set(c, "hit_revealed", f"R2k live marker ended by a teammate kill (hud id={kv.id}) -> target was under fire; "

@@ -134,6 +134,11 @@ class Contact:
     #   timeout     : reveal simply ended
     end_reason: str = ""
     end_hud_id: Optional[int] = None
+    # distance (world m) to the nearest OWN respawn_base_* point (blue). RB 2026-10-10: every live
+    # red marker appeared when the enemy crossed ~150-250 m of our spawn and vanished when it left.
+    spawn_dist_m: Optional[float] = None
+    spawn_dist_first_m: Optional[float] = None
+    spawn_dist_max_m: Optional[float] = None
     # bookkeeping
     n_obs: int = 0
     n_pos_changes: int = 0

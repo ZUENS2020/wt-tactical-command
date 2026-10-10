@@ -63,3 +63,11 @@ def find_player(objs):
         if o.icon == "Player" and o.x is not None and (tuple(o.rgb) == SELF_RGB or (tuple(o.rgb) == SIGNAL_RGB and o.blink == 2)):
             return o
     return None
+
+
+def is_own_spawn(o) -> bool:
+    """Our team's respawn_base_* point (friendly blue #174DFF). Enemy bases are #fa0C00."""
+    if not o.type.startswith("respawn_base") or o.x is None or o.y is None:
+        return False
+    r, g, b = o.rgb
+    return b >= 200 and r < 130
