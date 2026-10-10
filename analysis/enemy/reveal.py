@@ -8,6 +8,16 @@ Sources for the timing priors:
     coloured icon is briefly displayed on the minimap when nearby allies scout or hit a vehicle".
 Observed in our data (test drive only): ground targets #fa0C00/blink0 static; the same
 targets toggle to #f00C00/blink2 and back; enemy aircraft always #f00C00/blink2.
+
+RB ground evidence (2026-10-10, sessions 1709 + df9b with GUI labels, ~6 battles):
+  * only ONE enemy variant ever appears in a real battle: ground_model #fa0C00 blink 0, no dx/dy;
+    #f00C00 / blink 2 never (0 obs) -> test-drive/AI-only.
+  * markers are LIVE: position changes on ~95-100 % of 10 Hz polls (not a frozen last-known
+    position, not "periodic" jumps); visible 2-41 s; end by kill (hud kill line <=0.5 s) or timeout.
+  * none of the user's own hits/kills (14 ground kills, 2 i_hit labels) produced a marker; the
+    labelled hit-only battle (gen 35) had 0 markers; the 2 team_scouted labels had 0 markers +-15 s.
+  * every marker was 330-470 m from the player and 53-180 m from the nearest teammate.
+So for live-tracked RB markers the scout-vs-hit cause is NOT separable from map_obj fields (R6).
 """
 from .classify import red_shade
 
@@ -49,7 +59,40 @@ def _scout_kill_near_end(c, tr):
     return None
 
 
+KILL_PRE_MS = 1000      # kill line may be polled slightly before the marker disappears
+KILL_POST_MS = 1500     # hudmsg 2 Hz + receive jitter
+LIVE_RATIO = 0.6        # share of polls with a new position
+LIVE_MAX_STATIC_MS = 1500
+
+
+def is_live_tracked(c) -> bool:
+    """RB 2026-10-10: reveal markers follow the target every poll (moves on ~all 10 Hz frames).
+    The wiki's 'updates periodically' scout pattern would show long frozen stretches + jumps."""
+    if c.n_obs < 5:
+        return False
+    return c.n_pos_changes / max(1, c.n_obs - 1) >= LIVE_RATIO and c.max_static_ms <= LIVE_MAX_STATIC_MS
+
+
+def end_reason(c, tr):
+    """Refine c.end_reason once the contact is invisible: a kill line near last_seen wins
+    (hud arrives up to ~1.5 s later, so this is re-run on every update)."""
+    if c.visible or c.end_reason == "killed":
+        return
+    for ev in tr.hud:
+        if ev.kind == "kill" and c.last_seen_ms - KILL_PRE_MS <= ev.t_ms <= c.last_seen_ms + KILL_POST_MS:
+            c.end_reason, c.end_hud_id = "killed", ev.id
+            return
+    if not c.end_reason:
+        c.end_reason = "timeout"
+
+
+def _kill_at_end(c, tr):
+    return next((ev for ev in tr.hud if c.end_hud_id is not None and ev.id == c.end_hud_id), None)
+
+
 def classify(c, tr, final: bool = False):
+    if not c.visible:
+        end_reason(c, tr)
     span, closed = _first_span_ms(c)
     shade = red_shade(c.color, c.rgb)
     blinks = {b for _, b, _ in c.blink_seq}
@@ -66,9 +109,20 @@ def classify(c, tr, final: bool = False):
     if sk is not None:
         _set(c, "scouted", f"R1s vanished within 1.5 s of hudmsg scout award '{sk.kind}' id={sk.id} (scouted target destroyed)", 0.75)
         return
+    live = is_live_tracked(c)
+    kv = _kill_at_end(c, tr) if c.end_reason == "killed" else None
+    if kv is not None and live and not kv.involves_player:
+        _set(c, "hit_revealed", f"R2k live marker ended by a teammate kill (hud id={kv.id}) -> target was under fire; "
+                                "scouting not excluded (no scout award)", 0.45)
+        return
     ev = _hud_near(c, tr)
     if ev is not None and (not closed or span <= HIT_MAX_MS):
         _set(c, "hit_revealed", f"R2 hudmsg '{ev.kind}' id={ev.id} within -{HUD_PRE_MS}/+{HUD_POST_MS} ms of first_seen", 0.6 if ev.involves_player else 0.5)
+        return
+    if live and shade == "fa0C00" and blinks == {0}:
+        _set(c, "unknown", f"R6 RB live marker #fa0C00/blink0 ({span/1000:.1f}s, moved on "
+                           f"{c.n_pos_changes}/{max(1, c.n_obs - 1)} polls): scout vs teammate-hit not separable "
+                           "from map_obj fields (2026-10-10 labelled battles)", 0.0)
         return
     if closed and SCOUT_MIN_MS <= span <= SCOUT_MAX_MS:
         conf = 0.55 + (0.15 if c.n_pos_changes >= 2 and c.max_static_ms >= 800 else 0.0)

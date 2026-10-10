@@ -36,11 +36,24 @@ def parse_body(r):
         return None
 
 
+def rec_time(r) -> int:
+    """Server-synced time when the receiver stamped it (collector >= 0.2.0; same clock as '#label'
+    t_server), else the collector wall clock."""
+    t = r.get("ts_server_ms")
+    return int(t) if isinstance(t, (int, float)) else int(r["wall_ms"])
+
+
 def events(records, player_names=PLAYER_NAMES):
-    """Yield ('map_info', t, MapInfo|None) / ('frame', t, Frame) / ('hud', t, HudEvent) in time order."""
+    """Yield ('map_info', t, MapInfo|None) / ('frame', t, Frame) / ('hud', t, HudEvent) /
+    ('label', t, dict) in time order. Labels are ground truth for analysis only, never tracker input."""
     seen_ids = set()
-    for r in sorted(records, key=lambda r: (r["wall_ms"], r["seq"])):
-        ep, t = r.get("ep", ""), r["wall_ms"]
+    for r in sorted(records, key=lambda r: (rec_time(r), r.get("seq", 0))):
+        ep, t = r.get("ep", ""), rec_time(r)
+        if ep == "#label":
+            j = parse_body(r)
+            if isinstance(j, dict):
+                yield ("label", int(j.get("t_server") or t), j)
+            continue
         if r.get("status") not in (200, None):
             continue
         j = parse_body(r)
@@ -66,10 +79,11 @@ FRIENDLY_TYPES = ("ground_model", "aircraft")
 
 
 def is_friendly_unit(o) -> bool:
+    """Teammate / squadmate unit incl. fresh-spawn #1839A7 and signal #043FFF (see allies/classify.py)."""
     if o.icon == "Player" or o.type not in FRIENDLY_TYPES or o.x is None:
         return False
-    r, g, b = o.rgb
-    return (b >= 200 and r < 130) or (g >= 200 and r < 130 and b < 130)
+    from allies.classify import classify
+    return classify(o).side in ("ally", "squad")
 
 
 def detect_session_kind(frames, hud_events):

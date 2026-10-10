@@ -52,8 +52,14 @@ def is_trackable_enemy(o) -> bool:
     return is_enemy_rgb(o.rgb)
 
 
+SELF_RGB = (250, 200, 30)     # #faC81E
+SIGNAL_RGB = (4, 63, 255)     # #043FFF blink 2 (own radio message / ping)
+
+
 def find_player(objs):
+    """Own Player object. While dead/spectating the Player icon follows a teammate in #174DFF
+    (confirmed 2026-10-10, ALLY_MARKERS_20261010.md) -> not self, return None (caller keeps last fix)."""
     for o in objs:
-        if o.icon == "Player" and o.x is not None:
+        if o.icon == "Player" and o.x is not None and (tuple(o.rgb) == SELF_RGB or (tuple(o.rgb) == SIGNAL_RGB and o.blink == 2)):
             return o
     return None

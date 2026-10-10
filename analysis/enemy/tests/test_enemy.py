@@ -25,7 +25,7 @@ def run(recs, kind=None):
             tr.set_map_info(v)
         elif k == "hud":
             tr.add_hud_event(v); huds.append(v)
-        else:
+        elif k == "frame":
             frames.append(v)
             snaps[t] = [(c.contact_id, c.icon, c.blink, c.visible) for c in tr.update(v)]
     tr.session_kind = kind or stream.detect_session_kind(frames, huds)[0]
@@ -231,6 +231,77 @@ class TestHudKinds(unittest.TestCase):
             tr.update(Frame(t, (PLAYER,)))
         tr.finish()
         self.assertEqual(tr.all_contacts()[0].reveal_kind, "scouted")
+
+
+class TestRBLabelledBattle(unittest.TestCase):
+    """Real RB ground battle, session 20261010-203023-shengyuan-df9b (collector 0.2.0, GUI labels,
+    times = receiver-synced ts_server_ms). Map objects trimmed to ground_model/aircraft."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.R = {n: load_fx(f"rb_df9b_{n}.jsonl.gz") for n in ("red_spaa_kv1_death", "scout_labels_death",
+                                                                 "kill_labels", "hitonly_gen35")}
+        cls.T = {n: run(r) for n, r in cls.R.items()}
+
+    def labels(self, n):
+        return [(t, v["label_id"]) for k, t, v in stream.events(self.R[n]) if k == "label"]
+
+    def test_session_kind_battle(self):
+        for n, (tr, *_ ) in self.T.items():
+            self.assertEqual(tr.session_kind, "battle", n)
+
+    def test_only_variant_is_fa0C00_blink0(self):
+        for n, (_, frames, _, _) in self.T.items():
+            for f in frames:
+                for o in f.objects:
+                    if is_trackable_enemy(o):
+                        self.assertEqual((o.color, o.blink, o.has_dir), ("#fa0C00", 0, False), n)
+
+    def test_red_markers_live_and_end(self):
+        tr, _, huds, _ = self.T["red_spaa_kv1_death"]
+        cs = tr.all_contacts()
+        self.assertEqual([c.icon for c in cs], ["SPAA", "HeavyTank"])
+        spaa, kv1 = cs
+        for c, dur in ((spaa, 14.8), (kv1, 20.8)):
+            self.assertEqual(len(c.visible_spans), 1)
+            a, b = c.visible_spans[0]
+            self.assertAlmostEqual((b - a) / 1000, dur, delta=0.3)
+            self.assertTrue(reveal.is_live_tracked(c))          # not frozen, not periodic
+            self.assertGreater(c.n_pos_changes / c.n_obs, 0.9)
+            self.assertEqual({bl for _, bl, _ in c.blink_seq}, {0})
+        self.assertEqual(spaa.end_reason, "timeout")
+        self.assertEqual(spaa.reveal_kind, "unknown"); self.assertTrue(spaa.reveal_rule.startswith("R6"))
+        self.assertEqual(kv1.end_reason, "killed")
+        kill = [e for e in huds if e.id == kv1.end_hud_id][0]
+        self.assertIn("(KV-1)", kill.msg); self.assertFalse(kill.involves_player)
+        self.assertLess(abs(kill.t_ms - kv1.last_seen_ms), 500)
+        self.assertEqual(kv1.reveal_kind, "hit_revealed"); self.assertTrue(kv1.reveal_rule.startswith("R2k"))
+
+    def test_no_markers_at_own_hits_kills_or_scout_labels(self):
+        for n in ("scout_labels_death", "kill_labels", "hitonly_gen35"):
+            tr = self.T[n][0]
+            self.assertEqual(tr.all_contacts(), [], n)
+        self.assertEqual([l for _, l in self.labels("scout_labels_death")], ["team_scouted", "team_scouted"])
+        self.assertEqual(len(self.labels("hitonly_gen35")), 5)
+
+    def test_kill_labels_lag_hudmsg(self):
+        huds = self.T["kill_labels"][2]
+        own = [e for e in huds if e.kind == "kill" and e.involves_player and
+               e.msg.index("击毁了") > e.msg.index("传奇耐摔王无声铃鹿")]
+        for t, lab in self.labels("kill_labels"):
+            prev = max(e.t_ms for e in own if e.t_ms <= t)
+            self.assertTrue(1500 <= t - prev <= 4000, (lab, t - prev))
+
+    def test_own_icon_turns_blue_after_death(self):
+        tr, frames, huds, _ = self.T["scout_labels_death"]
+        death = [e for e in huds if e.kind == "kill" and e.msg.endswith("传奇耐摔王无声铃鹿 (东线虎)")][0]
+        blue = [f.t_ms for f in frames for o in f.objects if o.icon == "Player" and o.rgb == (23, 77, 255)]
+        self.assertTrue(blue)
+        self.assertAlmostEqual((blue[0] - death.t_ms) / 1000, 7.3, delta=0.6)
+        from enemy.classify import find_player
+        for f in frames:                                         # blue Player = spectating, not "self"
+            if f.t_ms in blue:
+                self.assertIsNone(find_player(f.objects))
 
 
 if __name__ == "__main__":

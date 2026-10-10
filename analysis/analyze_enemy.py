@@ -83,7 +83,7 @@ def run_segment(sess, recs, a, b):
             tr.set_map_info(v); infos.append(v)
         elif kind == 'hud':
             tr.add_hud_event(v); huds.append(v)
-        else:
+        elif kind == 'frame':
             frames.append(v)
             live = tr.update(v)
             for o in v.objects:

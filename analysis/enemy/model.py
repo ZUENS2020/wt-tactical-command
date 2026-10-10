@@ -127,6 +127,13 @@ class Contact:
     reveal_kind: str = "unknown"
     reveal_rule: str = ""
     reveal_confidence: float = 0.0
+    # why the marker went away (set when it becomes invisible / at finish):
+    #   killed      : a hudmsg kill line arrived within -1.0/+1.5 s of last_seen (RB 2026-10-10: KV-1 marker
+    #                 vanished 0.11 s before "... 击毁了 x2ded#2 (KV-1)")
+    #   player_gone : own Player icon absent at that moment (death / respawn screen / vehicle switch)
+    #   timeout     : reveal simply ended
+    end_reason: str = ""
+    end_hud_id: Optional[int] = None
     # bookkeeping
     n_obs: int = 0
     n_pos_changes: int = 0

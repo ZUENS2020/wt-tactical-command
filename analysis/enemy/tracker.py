@@ -44,6 +44,7 @@ class EnemyTracker:
         self.hud: List[HudEvent] = []
         self.player: Optional[MapObj] = None
         self.now_ms: int = 0
+        self.player_seen_ms: Optional[int] = None   # last frame with our own (alive) Player icon
         self._next_id = 1
 
     # ---------------------------------------------------------------- inputs
@@ -68,7 +69,9 @@ class EnemyTracker:
         mi = self.map_info
         if mi is None:
             return []
-        self.player = find_player(frame.objects) or self.player
+        p = find_player(frame.objects)
+        if p is not None:
+            self.player, self.player_seen_ms = p, frame.t_ms
         dets = [o for o in frame.objects if is_trackable_enemy(o)]
         self._associate(dets, frame.t_ms)
         self._age(frame.t_ms)
@@ -91,6 +94,8 @@ class EnemyTracker:
             if c.visible:
                 c.visible_spans.append((c._span_start_ms, c.last_seen_ms))
                 c.visible = False
+                c.end_reason = "stream_end"
+            reveal.end_reason(c, self)
             reveal.classify(c, self, final=True)
         self.closed.extend(self.contacts.values())
         self.contacts.clear()
@@ -197,6 +202,10 @@ class EnemyTracker:
             if c.visible and c.age_ms > self.cfg.lost_after_ms:
                 c.visible = False
                 c.visible_spans.append((c._span_start_ms, c.last_seen_ms))
+                # own icon missing around the disappearance -> view change (death, respawn screen)
+                gone = self.player_seen_ms is None or self.player_seen_ms < c.last_seen_ms + 150
+                c.end_reason = "player_gone" if gone else "timeout"
+                reveal.end_reason(c, self)
             if not c.visible and c.age_ms > self.cfg.expire_ms:
                 drop.append(cid)
         for cid in drop:
