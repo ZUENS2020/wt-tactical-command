@@ -51,6 +51,10 @@ impl NavalCfg {
         c
     }
     pub fn is_naval_obj(&self, o: &Value) -> bool {
+        // map markers / pings and friendly signal states are never naval
+        if o["type"].as_str() == Some("point_of_interest") {
+            return false;
+        }
         let icon = o["icon"].as_str().unwrap_or("").to_ascii_lowercase();
         if self.icons.contains(&icon) {
             return true; // exact match only: "TankDestroyer" != "destroyer"

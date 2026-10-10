@@ -41,6 +41,11 @@ pub fn default_labels() -> Vec<LabelDef> {
         d("enemy_icon", "敌机/敌人出现在地图上", "#6a1b9a"),
         d("kill", "击毁", "#37474f"),
         d("died", "阵亡", "#212121"),
+        // 0.2.1: squadmates + map pings (标点) ground truth
+        d("i_pinged", "我打了标点", "#f9a825"),
+        d("team_pinged", "队友标点", "#1565c0"),
+        d("squad_pinged", "小队队友标点", "#558b2f"),
+        d("squad_near", "小队成员在附近", "#00695c"),
         LabelDef { id: NOTE_ID.into(), text: "自定义备注".into(), color: Some("#455a64".into()), note: true },
     ]
 }
@@ -115,6 +120,19 @@ pub struct Snapshot {
     /// number of objects in the latest map_obj frame and how many are enemy red
     pub objects: usize,
     pub enemy_objects: usize,
+    /// 0.2.1: enemy *units* (excludes red respawn bases / zones, which enemy_objects counts), squadmate units
+    /// (#67D756 / #39D921), units blinking #043FFF (owner just sent a radio message / map ping),
+    /// own Player blinking (own ping/radio), spectator camera (Player icon on a teammate after death)
+    #[serde(default)]
+    pub enemy_units: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub squad_xy: Vec<[f64; 2]>,
+    #[serde(default)]
+    pub signal_units: usize,
+    #[serde(default)]
+    pub self_signal: bool,
+    #[serde(default)]
+    pub spectating: bool,
     /// seq and local wall time of the latest map_obj frame
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map_obj_seq: Option<u64>,
@@ -333,11 +351,23 @@ mod tests {
     #[test]
     fn defaults_are_valid_and_chinese() {
         let d = resolve_labels(None).unwrap();
-        assert_eq!(d.len(), 9);
+        assert_eq!(d.len(), 13);
         assert_eq!(d[0].text, "我侦察到敌人");
         assert_eq!(d[7].id, "died");
-        assert!(d[8].note);
+        assert_eq!(d[8].text, "我打了标点");
+        assert_eq!(d[11].id, "squad_near");
+        assert!(d[12].note);
         assert_eq!(resolve_labels(Some(vec![])).unwrap(), d);
+    }
+
+    #[test]
+    fn package_toml_labels_equal_defaults() {
+        #[derive(Deserialize)]
+        struct F {
+            labels: Option<Vec<LabelDef>>,
+        }
+        let f: F = toml::from_str(include_str!("../../dist/pkg/wt-collector.tmpl.toml")).unwrap();
+        assert_eq!(resolve_labels(f.labels).unwrap(), default_labels());
     }
 
     #[test]
@@ -366,7 +396,7 @@ note = true
         assert!(l[1].note);
         // missing section -> defaults
         let f: F = toml::from_str("server = 'x'").unwrap_or(F { labels: None });
-        assert_eq!(resolve_labels(f.labels).unwrap().len(), 9);
+        assert_eq!(resolve_labels(f.labels).unwrap().len(), 13);
         // errors
         let bad = |s: &str| resolve_labels(toml::from_str::<F>(s).unwrap().labels).unwrap_err();
         assert!(bad("[[labels]]\nid='a b'\ntext='x'").contains("无效"));

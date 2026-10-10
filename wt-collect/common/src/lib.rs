@@ -1,4 +1,7 @@
 //! Shared record format for wt-collector / wt-receiver / wt-analyze.
+pub mod mapobj;
+pub mod radio;
+
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};

@@ -17,6 +17,7 @@ use wtc_common::{now_ms, Batch, Record};
 
 mod guard;
 mod labels;
+mod markers;
 mod naval;
 
 struct App {
@@ -84,6 +85,8 @@ struct Sess {
     /// latest #state / #heartbeat of a 0.2.0 collector: (recv_ms, paused, reason)
     gate: Option<(i64, bool, String)>,
     labels: u64,
+    /// squad / map ping / radio derivation (markers.rs) -> markers.jsonl
+    markers: markers::Markers,
 }
 
 /// Append records (already serialized lines) to the session's current samples file + seq.idx.
@@ -332,8 +335,21 @@ impl App {
                 lines.push(b'\n');
             }
             live_update(s, &r, now);
+            s.markers.feed(&r);
         }
         drop(ist);
+        if !s.markers.out.is_empty() {
+            let mut buf = Vec::new();
+            for v in s.markers.out.drain(..) {
+                if let Ok(j) = serde_json::to_vec(&v) {
+                    buf.extend_from_slice(&j);
+                    buf.push(b'\n');
+                }
+            }
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(s.dir.join("markers.jsonl")) {
+                let _ = f.write_all(&buf);
+            }
+        }
         s.guard.accepted += acc;
         s.guard.too_old += too_old;
         s.guard.from_future += future;
@@ -534,7 +550,8 @@ fn live_update(s: &mut Sess, r: &Record, now: i64) {
                             let y = o["y"].as_f64().or(o["sy"].as_f64()).unwrap_or(-1.0);
                             let icon = o["icon"].as_str().unwrap_or("").to_string();
                             let ty = o["type"].as_str().unwrap_or("").to_string();
-                            if icon == "Player" {
+                            // own Player only: after death the Player icon follows a spectated teammate (#174DFF)
+                            if icon == "Player" && wtc_common::mapobj::classify(o).side == wtc_common::mapobj::Side::Own {
                                 s.player_pos = Some((x, y, ty.clone()));
                             }
                             s.objs.push((x, y, o["color"].as_str().unwrap_or("#888").to_string(), icon, ty));
@@ -752,6 +769,47 @@ async fn labels_get(State(app): St, h: HeaderMap, Query(q): Query<LabelsQ>) -> R
     Json(serde_json::json!({"count": out.len(), "labels": out})).into_response()
 }
 
+#[derive(Deserialize)]
+struct MarkersQ {
+    session: Option<String>,
+    date: Option<String>,
+    /// only events with t >= since (server ms)
+    since: Option<i64>,
+    /// comma list of ev names (squad,signal_start,signal_end,signal_only,ping,location,radio,map_marker)
+    ev: Option<String>,
+    limit: Option<usize>,
+}
+
+/// GET /api/markers?session=<id|substring|latest>&since=<ms>&ev=ping,location (token required): derived squad / ping events.
+async fn markers_get(State(app): St, h: HeaderMap, Query(q): Query<MarkersQ>) -> Response {
+    if !app.authed(&h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    let evs: Option<Vec<String>> = q.ev.as_ref().map(|e| e.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect());
+    let mut out = Vec::new();
+    for (id, dir) in app.select_dirs(q.session.as_deref(), q.date.as_deref()) {
+        let Ok(t) = std::fs::read_to_string(dir.join("markers.jsonl")) else { continue };
+        for l in t.lines() {
+            let Ok(mut v) = serde_json::from_str::<serde_json::Value>(l) else { continue };
+            if q.since.map(|s| v["t"].as_i64().unwrap_or(0) < s).unwrap_or(false) {
+                continue;
+            }
+            if let Some(e) = &evs {
+                if !e.iter().any(|x| v["ev"].as_str() == Some(x.as_str())) {
+                    continue;
+                }
+            }
+            v["session"] = serde_json::Value::String(id.clone());
+            out.push(v);
+        }
+    }
+    let lim = q.limit.unwrap_or(5000).min(50_000);
+    if out.len() > lim {
+        out.drain(..out.len() - lim);
+    }
+    Json(serde_json::json!({"count": out.len(), "events": out})).into_response()
+}
+
 async fn img_get(State(app): St, AxPath((sid, file)): AxPath<(String, String)>) -> Response {
     if !safe_id(&sid) || !file.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
         return StatusCode::BAD_REQUEST.into_response();
@@ -835,6 +893,7 @@ async fn status_json(State(app): St) -> Response {
                 "player_pos": s.player_pos, "objects": s.objs.len(), "latest_img": s.latest_img, "mission": s.mission,
                 "army": s.army, "vehicle": s.vehicle, "notes": s.notes.len(), "labels": s.labels,
                 "upload_state": s.gate.as_ref().map(|g| serde_json::json!({"paused": g.1, "reason": g.2, "age_s": (now - g.0) as f64 / 1000.0})), "naval_objects_filtered": s.naval_objs, "data_lag_s": s.eps.values().map(|e| e.last_wall).max().map(|w| (now - w) as f64 / 1000.0), "naval_ticks_dropped": s.naval_ticks, "clock_guard": guard_json(&s.guard), "endpoints": ep_rows(s, now),
+                "allies": s.markers.live(now),
             })
         })
         .collect();
@@ -979,6 +1038,33 @@ async fn index(State(app): St) -> Html<String> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("markers") {
+        // offline: wt-receiver markers <session_dir> [--write]  -> derived events (stdout, or <dir>/markers.jsonl)
+        let dir = PathBuf::from(std::env::args().nth(2).ok_or_else(|| anyhow::anyhow!("usage: wt-receiver markers <session_dir> [--write]"))?);
+        let write = std::env::args().any(|a| a == "--write");
+        let mut m = markers::Markers::default();
+        let mut buf = Vec::new();
+        for r in wtc_common::read_session(&dir)? {
+            m.feed(&r);
+            for v in m.out.drain(..) {
+                buf.extend_from_slice(&serde_json::to_vec(&v)?);
+                buf.push(b'\n');
+            }
+        }
+        m.flush(i64::MAX / 2, true);
+        for v in m.out.drain(..) {
+            buf.extend_from_slice(&serde_json::to_vec(&v)?);
+            buf.push(b'\n');
+        }
+        if write {
+            std::fs::write(dir.join("markers.jsonl"), &buf)?;
+            eprintln!("wrote {} ({} bytes) counts {:?}", dir.join("markers.jsonl").display(), buf.len(), m.counts);
+        } else {
+            std::io::stdout().write_all(&buf)?;
+            eprintln!("counts {:?} squad_names {:?}", m.counts, m.squad_names);
+        }
+        return Ok(());
+    }
     let root = PathBuf::from(env("WT_DATA", "/workspace/wt-collect/data"));
     std::fs::create_dir_all(&root)?;
     let token = env("WT_TOKEN", "");
@@ -1028,6 +1114,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/note", post(note))
         .route("/api/label", post(label_post))
         .route("/api/labels", get(labels_get))
+        .route("/api/markers", get(markers_get))
         .route("/img/{session}/{file}", get(img_get))
         .layer(DefaultBodyLimit::max(256 * 1024 * 1024))
         .with_state(app.clone());

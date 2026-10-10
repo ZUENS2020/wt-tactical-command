@@ -319,12 +319,17 @@ struct GameState {
     map_obj_seq: Option<u64>,
     map_obj_wall: Option<i64>,
     map_img_hash: Option<String>,
+    enemy_units: usize,
+    squad_xy: Vec<[f64; 2]>,
+    signal_units: usize,
+    self_signal: bool,
+    spectating: bool,
 }
 
 /// red-ish map_obj color = enemy (#fa0C00 / #f00C00 in real data)
 fn is_enemy_color(o: &serde_json::Value) -> bool {
     if let Some(c) = o["color"].as_str().and_then(labels::parse_color) {
-        return c[0] >= 180 && c[1] < 80 && c[2] < 80;
+        return c[0] >= 200 && c[1] < 130 && c[2] < 130; // same rule as wt-analysis/enemy/classify.py
     }
     false
 }
@@ -452,6 +457,11 @@ impl Shared {
             vehicle: g.vehicle.clone(),
             objects: g.objects,
             enemy_objects: g.enemies,
+            enemy_units: g.enemy_units,
+            squad_xy: g.squad_xy.clone(),
+            signal_units: g.signal_units,
+            self_signal: g.self_signal,
+            spectating: g.spectating,
             map_obj_seq: g.map_obj_seq,
             map_obj_wall_ms: g.map_obj_wall,
         }
@@ -806,14 +816,24 @@ fn postprocess(sh: &Shared, kind: Kind, bytes: &[u8], (seq, wall): (u64, i64), c
         }
         Kind::MapObj => {
             if let Some(a) = v.as_array() {
-                let p = a.iter().find(|o| o["icon"].as_str() == Some("Player"));
+                use wtc_common::mapobj::{classify, find_self, Side};
+                // any Player icon = in battle (gate); self position only from the own (yellow / own-blink) Player:
+                // after death the Player icon follows a spectated teammate in #174DFF
+                let p_any = a.iter().find(|o| o["icon"].as_str() == Some("Player"));
+                let p = find_self(a);
                 let mut g = sh.game.lock().unwrap();
                 g.map_obj_seen = true;
                 g.objects = a.len();
-                g.player = p.map(|o| o["type"].as_str().unwrap_or("?").to_string());
+                g.player = p_any.map(|o| o["type"].as_str().unwrap_or("?").to_string());
                 g.player_xy = p.and_then(|o| Some([o["x"].as_f64()?, o["y"].as_f64()?]));
                 g.player_dxdy = p.and_then(|o| Some([o["dx"].as_f64()?, o["dy"].as_f64()?]));
                 g.enemies = a.iter().filter(|o| o["icon"].as_str() != Some("Player") && is_enemy_color(o)).count();
+                let cls: Vec<_> = a.iter().map(|o| (o, classify(o))).collect();
+                g.enemy_units = cls.iter().filter(|(o, c)| c.is_unit() && c.side == Side::Enemy && o["icon"].as_str() != Some("Player")).count();
+                g.squad_xy = cls.iter().filter(|(_, c)| c.is_unit() && c.side == Side::Squad).filter_map(|(o, _)| Some([o["x"].as_f64()?, o["y"].as_f64()?])).collect();
+                g.signal_units = cls.iter().filter(|(_, c)| c.signal && c.side != Side::Own).count();
+                g.self_signal = cls.iter().any(|(_, c)| c.signal && c.side == Side::Own);
+                g.spectating = cls.iter().any(|(_, c)| c.spectated);
                 g.map_obj_seq = Some(seq);
                 g.map_obj_wall = Some(wall);
             }

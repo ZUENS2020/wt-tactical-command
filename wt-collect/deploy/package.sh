@@ -10,7 +10,7 @@ sed "s#{SERVER}#$URL#g" dist/pkg/wt-collector.tmpl.toml > dist/pkg/wt-collector.
 python3 - <<'PY'
 import zipfile
 with zipfile.ZipFile('dist/wt-collector-win64.zip.tmp','w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
-    for f in ['wt-collector.exe','wt-collector.toml','README.txt','diag.bat']:
+    for f in ['wt-collector.exe','wt-collector.toml','README.txt','diag.bat','cli-run.bat']:
         z.write('dist/pkg/'+f,'wt-collector/'+f)
 PY
 mv dist/wt-collector-win64.zip.tmp dist/wt-collector-win64.zip

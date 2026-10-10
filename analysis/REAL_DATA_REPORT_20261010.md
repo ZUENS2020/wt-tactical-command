@@ -399,3 +399,12 @@ rates: indicators/map_obj/state 10 Hz, map_info/mission 1 Hz, hudmsg/gamechat 2 
 - `map_ground_3a7d46abe5a8.png`、`map_air_7e6edd02c5ec.png`、`map_placeholder_cfb99c04947c.png`
 - `map_ground_track_overlay.png`、`map_air_track_overlay.png`
 - `analysis_results.json`、`images_results.json`（数值结果）；`analyze.py`、`images.py`、`charts.py`、`load.py`（脚本，用 `.venv/bin/python` 运行）
+
+## 14. 补充：小队成员与地图标点（2026-10-10 晚，实战数据）
+
+详见 `SQUAD_PINGS_20261010.md`。要点：
+- 小队成员为绿色：陆 `#67D756`、空 `#39D921`。
+- 任何友方单位发信号时变为 `#043FFF` + blink 2。
+- 阵亡观战时 `Player` 为 `#174DFF`，不是本人。
+- 地图标点**没有** map_obj 对象，目标网格只在 gamechat 文本中；本人发出的标点不带网格。
+- 实现：`allies/`（Python），以及 `wt-collect/common/src/{mapobj,radio}.rs` 和 `receiver/src/markers.rs`（生成 `markers.jsonl`、`/api/markers`，`/api/status.allies`）。

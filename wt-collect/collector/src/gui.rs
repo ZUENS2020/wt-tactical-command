@@ -1,4 +1,4 @@
-//! Native window (egui/eframe, OpenGL) with data-labeling buttons. 0.2.0.
+//! Native window (egui/eframe, OpenGL) with data-labeling buttons. 0.2.0 (0.2.1: squad / ping buttons).
 //! Collection runs on the tokio runtime in the background; the window only reads shared state and
 //! queues label events (Shared::add_label). All UI text is Simplified Chinese.
 use crate::labels::{self, LabelDef};
@@ -237,8 +237,12 @@ impl App {
         let Some(sh) = &self.sh else { return };
         let ev = sh.add_label(&def.id, &def.text, note, "button");
         let t = chrono::DateTime::from_timestamp_millis(ev.t_local).map(|d| d.with_timezone(&chrono::Local).format("%H:%M:%S%.3f").to_string()).unwrap_or_default();
+        let t = t.get(..t.len().saturating_sub(2)).unwrap_or(&t).to_string(); // 20:15:29.5
         self.flash = Some(Flash {
-            text: format!("✔ 已记录：{}{}  {t}{}", ev.text, ev.note.as_deref().map(|n| format!("「{n}」")).unwrap_or_default(), if ev.clock_synced { "" } else { "（未对时，已标记）" }),
+            text: match ev.note.as_deref() {
+                Some(n) => format!("✔ {t} 备注「{n}」{}", if ev.clock_synced { "" } else { "（未对时）" }),
+                None => format!("✔ {t} 已记录：{}{}", ev.text, if ev.clock_synced { "" } else { "（未对时）" }),
+            },
             at: Instant::now(),
             color: Color32::from_rgb(46, 160, 67),
         });
@@ -256,7 +260,7 @@ impl App {
         let paused = *sh.paused.lock().unwrap();
         let up = {
             let u = sh.up.lock().unwrap();
-            (u.offline || !u.last_err.is_empty(), u.last_err.clone(), u.rate, u.buf_age_ms, u.drop_too_old + u.drop_overflow + u.drop_no_sync, u.srv_too_old + u.srv_from_future + u.srv_no_sync + u.rejected, u.last_ok.map(|t| t.elapsed()))
+            (u.offline || !u.last_err.is_empty(), u.last_err.clone(), u.rate, u.buf_age_ms, u.drop_too_old + u.drop_overflow + u.drop_no_sync, u.srv_too_old + u.srv_from_future + u.srv_no_sync + u.rejected, u.last_ok.map(|t| t.elapsed()), u.pending + u.inflight)
         };
         let ck = sh.clock.lock().unwrap().clone();
         let (nlab, npend, lerr) = {
@@ -300,21 +304,18 @@ impl App {
             ui.end_row();
 
             ui.label("上传");
+            // drop counters inline (a conditional extra row would shift the buttons under the mouse)
+            let drops = if up.4 + up.5 > 0 { format!(" · 丢弃 {}", up.4 + up.5) } else { String::new() };
             if paused.is_some() {
-                ui.colored_label(warn, format!("暂停中（每 {} 秒心跳） · 已跳过 {} 条重复数据", gate::HEARTBEAT.as_secs(), sh.suppressed.load(Ordering::Relaxed)));
+                ui.colored_label(warn, format!("暂停中（每 {} 秒心跳） · 已跳过 {} 条重复数据{drops}", gate::HEARTBEAT.as_secs(), sh.suppressed.load(Ordering::Relaxed)));
             } else if up.0 {
-                ui.colored_label(bad, format!("失败：{}", if up.1.is_empty() { "离线".into() } else { up.1.clone() }));
+                ui.colored_label(bad, format!("失败：{}{drops}", if up.1.is_empty() { "离线".into() } else { up.1.clone() }));
             } else if up.6.is_some() {
-                ui.colored_label(ok, format!("正常 · {:.0} 条/秒 · 缓冲 {:.1} 秒", up.2, up.3 as f64 / 1000.0));
+                ui.colored_label(ok, format!("正常 · {:.0} 条/秒 · 队列 {} · 延迟 {:.1} 秒{drops}", up.2, up.7, up.3 as f64 / 1000.0));
             } else {
                 ui.label("等待中…");
             }
             ui.end_row();
-            if up.4 + up.5 > 0 {
-                ui.label("");
-                ui.colored_label(warn, format!("已丢弃：本机 {} · 服务器 {}", up.4, up.5));
-                ui.end_row();
-            }
 
             ui.label("时钟");
             if ck.valid() {
@@ -427,23 +428,23 @@ impl eframe::App for App {
             let undo = sh.as_ref().and_then(|s| s.labels.lock().unwrap().undoable().map(|(e, left)| (e.text.clone(), left)));
             // one fixed-height row (no layout shift under the mouse): confirmation/hint left, undo right
             let mut do_undo = false;
-            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 30.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.allocate_ui_with_layout(egui::vec2(ui.available_width(), 30.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.set_min_height(30.0);
-                if flash_on {
-                    let f = self.flash.as_ref().unwrap();
-                    egui::Frame::new().fill(f.color).corner_radius(4.0).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
-                        ui.label(RichText::new(&f.text).color(Color32::WHITE).strong());
-                    });
-                } else {
-                    ui.weak("在事件发生的瞬间点击对应按钮");
-                }
                 if let Some((_, left)) = &undo {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(format!("撤销 {}s", left.as_secs() + 1)).on_hover_text("撤销最近一个标签（10 秒内）").clicked() {
-                            do_undo = true;
-                        }
-                    });
+                    if ui.button(format!("撤销 {}s", left.as_secs() + 1)).on_hover_text("撤销最近一个标签（10 秒内）").clicked() {
+                        do_undo = true;
+                    }
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    if flash_on {
+                        let f = self.flash.as_ref().unwrap();
+                        egui::Frame::new().fill(f.color).corner_radius(4.0).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
+                            ui.add(egui::Label::new(RichText::new(&f.text).color(Color32::WHITE).strong()).truncate());
+                        });
+                    } else {
+                        ui.weak("在事件发生的瞬间点击对应按钮");
+                    }
+                });
             });
             if do_undo {
                 if let Some(sh) = &sh {
