@@ -1,0 +1,167 @@
+{
+ "ground": {
+  "file": "3a7d46abe5a817839c04c68c0dc7ce2578db441bea1ba0047a907dd794c8c33e.jpg",
+  "bytes": 506117,
+  "sha256": "3a7d46abe5a817839c04c68c0dc7ce2578db441bea1ba0047a907dd794c8c33e",
+  "format": "JPEG",
+  "mode": "RGB",
+  "size": [
+   2048,
+   2048
+  ],
+  "dhash": "b695d193b62668987830e40638943cde73bce9b0d375a5b7474b1e268",
+  "wtp_exact": false,
+  "wtp_lookup": [
+   "firing_range_tankmap",
+   "Firing Range Tankmap",
+   "unknown"
+  ],
+  "nearest5": [
+   [
+    20,
+    "firing_range_tankmap",
+    "unknown"
+   ],
+   [
+    90,
+    "khalkhin_gol",
+    "unknown"
+   ],
+   [
+    91,
+    "air_denmark_map",
+    "air"
+   ],
+   [
+    91,
+    "avg_israel_tankmap",
+    "ground"
+   ],
+   [
+    92,
+    "honolulu",
+    "unknown"
+   ]
+  ],
+  "top_color": "#3f3f25",
+  "top_frac": 0.004250764846801758,
+  "mean_rgb": [
+   80.65027213096619,
+   77.4714503288269,
+   53.55552291870117
+  ],
+  "jpeg_info": {
+   "jfif": "257"
+  }
+ },
+ "air": {
+  "file": "7e6edd02c5ec91acd42917c3c60c4e588cd8823080860e86929aceae370bc45f.jpg",
+  "bytes": 202995,
+  "sha256": "7e6edd02c5ec91acd42917c3c60c4e588cd8823080860e86929aceae370bc45f",
+  "format": "JPEG",
+  "mode": "RGB",
+  "size": [
+   2048,
+   2048
+  ],
+  "dhash": "666598db76360eece619d93226148d401a5488f0a76374c225c60d800",
+  "wtp_exact": false,
+  "wtp_lookup": [
+   "air_denmark_map",
+   "✈️ Denmark",
+   "air"
+  ],
+  "nearest5": [
+   [
+    23,
+    "air_denmark_map",
+    "air"
+   ],
+   [
+    89,
+    "ruhr",
+    "unknown"
+   ],
+   [
+    91,
+    "avn_northwestern_islands_map",
+    "air_in_naval"
+   ],
+   [
+    93,
+    "avg_iberian_castle_map",
+    "air_in_ground"
+   ],
+   [
+    94,
+    "avg_norway_plain_map",
+    "unknown"
+   ]
+  ],
+  "top_color": "#141b21",
+  "top_frac": 0.09624218940734863,
+  "mean_rgb": [
+   37.92214012145996,
+   41.56810402870178,
+   30.501916646957397
+  ],
+  "jpeg_info": {
+   "jfif": "257"
+  }
+ },
+ "placeholder": {
+  "file": "cfb99c04947c94c19d4c523c1e0fb3a2d71d403263fefcad5f4c4fc8485d07d0.png",
+  "bytes": 1519,
+  "sha256": "cfb99c04947c94c19d4c523c1e0fb3a2d71d403263fefcad5f4c4fc8485d07d0",
+  "format": "PNG",
+  "mode": "RGBA",
+  "size": [
+   128,
+   128
+  ],
+  "dhash": "0000048036008f002604e6061802600580034016800c0020001000000",
+  "wtp_exact": true,
+  "wtp_lookup": [
+   "no_map",
+   "No Map",
+   "unknown"
+  ],
+  "nearest5": [
+   [
+    0,
+    "no_map",
+    "unknown"
+   ],
+   [
+    20,
+    "unknownmap",
+    "unknown"
+   ],
+   [
+    69,
+    "avn_alps_fjord_map",
+    "air_in_naval"
+   ],
+   [
+    72,
+    "avg_lazzaro_italy_map",
+    "air_in_ground"
+   ],
+   [
+    73,
+    "air_south_eastern_city_map",
+    "air"
+   ]
+  ],
+  "top_color": "#404040",
+  "top_frac": 0.91937255859375,
+  "mean_rgb": [
+   68.6776123046875,
+   68.6776123046875,
+   68.6776123046875
+  ],
+  "jpeg_info": {
+   "dpi": "(95.9866, 95.9866)"
+  }
+ }
+}

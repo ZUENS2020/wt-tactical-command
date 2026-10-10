@@ -1,0 +1,37 @@
+[package]
+name = "wt-collector"
+version = "0.2.0"
+edition.workspace = true
+
+[[bin]]
+name = "wt-collector"
+path = "src/main.rs"
+
+[dependencies]
+wtc-common = { path = "../common" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync", "fs", "io-util"] }
+reqwest = { version = "0.12", default-features = false, features = ["system-proxy", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+flate2 = "1"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rand = "0.8"
+
+[features]
+default = ["gui"]
+gui = ["dep:eframe"]
+
+[dependencies.eframe]
+version = "0.36"
+optional = true
+default-features = false
+features = ["glow", "default_fonts", "x11"]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }

@@ -1,0 +1,27 @@
+[Unit]
+Description=War Thunder collector receiver (wt-receiver)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wt-receiver
+Group=wt-receiver
+EnvironmentFile=/opt/wt-receiver/receiver.env
+ExecStart=/opt/wt-receiver/bin/wt-receiver
+WorkingDirectory=/var/lib/wt-receiver
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+LimitNOFILE=65536
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ReadWritePaths=/var/lib/wt-receiver
+
+[Install]
+WantedBy=multi-user.target

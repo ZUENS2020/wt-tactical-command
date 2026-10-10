@@ -1,0 +1,23 @@
+# wt-collector 配置（与 exe 放在同一文件夹）。命令行参数优先于这里的设置。
+server = "{SERVER}"
+token = "CHANGE_ME_WT_TOKEN"
+# 测试者名称（会出现在会话 ID 和状态页上）
+player = "shengyuan"
+
+# 游戏网页接口：新版客户端可能在 9222 端口（旧版 8111）。"auto" = 依次探测 8111、9222
+# （127.0.0.1 优先，然后本机局域网 IP），失败后自动重新探测。也可写死，例如 game_port = 9222
+game_port = "auto"
+# game_host = "127.0.0.1"   # 只允许 127.0.0.1 或本机自己的局域网 IP
+
+# 快组采样率预设（map_obj / indicators / state），可选 2 / 5 / 10 / 20
+# rate = 10
+
+[rates]
+map_obj = 10
+indicators = 10
+state = 10
+map_info = 1
+mission = 1
+hudmsg = 2
+gamechat = 2
+map_img_check_s = 5

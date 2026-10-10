@@ -1,0 +1,647 @@
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { MAPS, canonToNorm, normToCanon, gridBox, rowLetter, metersPerNorm, metersPerCanon, bearingDeg, dist, fmtDist, fmtBearing, fmtClock, type MapId, type V2 } from './geo';
+import { getState, setState, useStore, type Drawing, type ViewState } from './store';
+import { tapMap } from './actions';
+import { getSnapshot, ICON_SIDC, ICON_ZH, battleTime } from './sim';
+import { unitSprite, PointGlyph } from './symbols';
+import { sampleSmooth, polyD, headD, attackArrowD, polyDist, wedgeD, trimEnd } from './draw';
+import { C } from './theme';
+
+const imgCache = new Map<string, HTMLImageElement>();
+function getImg(src: string, onload: () => void) {
+  let im = imgCache.get(src);
+  if (!im) { im = new Image(); im.src = src; imgCache.set(src, im); }
+  if (!im.complete) im.addEventListener('load', onload, { once: true });
+  return im;
+}
+
+export function defaultView(map: MapId): ViewState {
+  const b = gridBox(map);
+  return { cx: b.x0 + b.w / 2, cy: b.y0 + b.h / 2, z: 1 / (Math.max(b.w, b.h) * 1.06) };
+}
+const ZMAX: Record<MapId, number> = { ground: 28, air: 90 };
+function clampView(v: ViewState): ViewState {
+  const z = Math.min(ZMAX.ground * 4, Math.max(1, v.z));
+  const h = 0.5 / z;
+  const cx = Math.min(Math.max(v.cx, h), 1 - h);
+  const cy = Math.min(Math.max(v.cy, h), 1 - h);
+  return { cx: z <= 1 ? 0.5 : cx, cy: z <= 1 ? 0.5 : cy, z };
+}
+
+interface Props { map: MapId; size: number; interactive: boolean; dual: boolean; }
+
+export default function MapView({ map, size: S, interactive, dual }: Props) {
+  const baseRef = useRef<HTMLCanvasElement>(null);
+  const liveRef = useRef<HTMLCanvasElement>(null);
+  const [view, setViewLocal] = useState<ViewState>(() => clampView(getState().views[map] ?? defaultView(map)));
+  const viewRef = useRef(view); viewRef.current = view;
+  const [, force] = useState(0);
+  const dpr = Math.min(2.5, window.devicePixelRatio || 1);
+  const drawings = useStore((s) => s.drawings);
+  const layers = useStore((s) => s.layers);
+  const selectedId = useStore((s) => s.selectedId);
+  const draft = useStore((s) => s.draft);
+  const ruler = useStore((s) => s.ruler);
+  const hover = useStore((s) => s.hover);
+  const tool = useStore((s) => s.tool);
+  const moving = useStore((s) => s.moving);
+  const rulerSpeed = useStore((s) => s.rulerSpeed);
+  const cfg = MAPS[map];
+  const compact = S < 330;
+
+  const setView = useCallback((v: ViewState) => {
+    const c = clampView(v);
+    setViewLocal(c);
+    setState((s) => ({ views: { ...s.views, [map]: c } }));
+  }, [map]);
+
+  // projections
+  const toS = useCallback((n: V2, v = viewRef.current): V2 => [(n[0] - v.cx) * S * v.z + S / 2, (n[1] - v.cy) * S * v.z + S / 2], [S]);
+  const fromS = useCallback((p: V2, v = viewRef.current): V2 => [(p[0] - S / 2) / (S * v.z) + v.cx, (p[1] - S / 2) / (S * v.z) + v.cy], [S]);
+  const wToS = useCallback((w: V2, v = viewRef.current) => toS(canonToNorm(map, w), v), [toS, map]);
+
+  // ---------- base layer: image + grid ----------
+  useEffect(() => {
+    const cv = baseRef.current; if (!cv) return;
+    cv.width = Math.round(S * dpr); cv.height = Math.round(S * dpr);
+    const ctx = cv.getContext('2d')!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = '#d9d6ca'; ctx.fillRect(0, 0, S, S);
+    const im = getImg(cfg.img, () => force((x) => x + 1));
+    const v = view;
+    const o = toS([0, 0], v), full = S * v.z;
+    if (im.complete && im.naturalWidth) {
+      // source rect for visible part (keeps huge zooms cheap); proportional only
+      const n0 = fromS([0, 0], v), n1 = fromS([S, S], v);
+      const sx0 = Math.max(0, n0[0]), sy0 = Math.max(0, n0[1]), sx1 = Math.min(1, n1[0]), sy1 = Math.min(1, n1[1]);
+      const W = im.naturalWidth;
+      if (sx1 > sx0 && sy1 > sy0) {
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(im, sx0 * W, sy0 * W, (sx1 - sx0) * W, (sy1 - sy0) * W, o[0] + sx0 * full, o[1] + sy0 * full, (sx1 - sx0) * full, (sy1 - sy0) * full);
+      }
+    }
+    const b = gridBox(map);
+    const bx0 = toS([b.x0, b.y0], v), bx1 = toS([b.x0 + b.w, b.y0 + b.h], v);
+    // dim outside the battle grid
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, S, S); ctx.rect(bx0[0], bx0[1], bx1[0] - bx0[0], bx1[1] - bx0[1]);
+    ctx.fillStyle = 'rgba(78,80,68,0.20)'; ctx.fill('evenodd');
+    ctx.restore();
+    if (layers.grid) {
+      ctx.strokeStyle = 'rgba(38,44,34,0.40)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i <= b.cols; i++) {
+        const x = Math.round(toS([Math.min(b.x0 + i * b.stepX, b.x0 + b.w), 0], v)[0]) + 0.5;
+        ctx.moveTo(x, Math.max(0, bx0[1])); ctx.lineTo(x, Math.min(S, bx1[1]));
+      }
+      for (let j = 0; j <= b.rows; j++) {
+        const y = Math.round(toS([0, Math.min(b.y0 + j * b.stepY, b.y0 + b.h)], v)[1]) + 0.5;
+        ctx.moveTo(Math.max(0, bx0[0]), y); ctx.lineTo(Math.min(S, bx1[0]), y);
+      }
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(38,44,34,0.65)'; ctx.lineWidth = 1.4;
+      ctx.strokeRect(bx0[0], bx0[1], bx1[0] - bx0[0], bx1[1] - bx0[1]);
+      // WT style labels: letters (rows) on the left, numbers (cols) on top
+      const fs = compact ? 10 : 12;
+      ctx.font = `700 ${fs}px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif`;
+      ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+      const cellPx = b.stepX * S * v.z;
+      const lx = Math.min(Math.max(bx0[0], 0), S) + (compact ? 4 : 6);
+      const ty = Math.min(Math.max(bx0[1], 0), S) + (compact ? 7 : 9);
+      const lab = (t: string, x: number, y: number, align: CanvasTextAlign) => {
+        ctx.textAlign = align;
+        ctx.strokeStyle = 'rgba(244,242,233,0.9)'; ctx.lineWidth = 3; ctx.strokeText(t, x, y);
+        ctx.fillStyle = '#2d3528'; ctx.fillText(t, x, y);
+      };
+      if (cellPx > 16) {
+        for (let j = 0; j < b.rows; j++) {
+          const yc = toS([0, b.y0 + (j + 0.5) * b.stepY], v)[1];
+          if (yc > ty + 8 && yc < S - 4 && yc < bx1[1]) lab(rowLetter(j), lx, yc, 'left');
+        }
+        for (let i = 0; i < b.cols; i++) {
+          const xc = toS([b.x0 + (i + 0.5) * b.stepX, 0], v)[0];
+          if (xc > lx + 14 && xc < S - 4 && xc < bx1[0]) lab(String(i + 1), xc, ty, 'center');
+        }
+      }
+    }
+    if (map === 'air') {
+      // ground battle area (mock ground→air transform) as dashed outline on the air overview
+      const gb = gridBox('ground');
+      const a = toS(canonToNorm('air', [gb.x0 * 4096, gb.y0 * 4096]), v), c2 = toS(canonToNorm('air', [(gb.x0 + gb.w) * 4096, (gb.y0 + gb.h) * 4096]), v);
+      ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(43,50,38,0.75)'; ctx.lineWidth = 1.3;
+      ctx.strokeRect(a[0], a[1], c2[0] - a[0], c2[1] - a[1]); ctx.restore();
+      ctx.font = `600 10px "Noto Sans SC", Arial, sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      ctx.strokeStyle = 'rgba(244,242,233,0.9)'; ctx.lineWidth = 3; ctx.strokeText('陆战区', a[0] + 2, a[1] - 2);
+      ctx.fillStyle = '#2d3528'; ctx.fillText('陆战区', a[0] + 2, a[1] - 2);
+    }
+    // scale bar (bottom-left)
+    const mpp = metersPerNorm(map) / (S * v.z);
+    const target = (compact ? 56 : 80) * mpp;
+    const pow = Math.pow(10, Math.floor(Math.log10(target)));
+    const nice = [1, 2, 5, 10].map((k) => k * pow).reduce((a, c) => (Math.abs(c - target) < Math.abs(a - target) ? c : a));
+    const px = nice / mpp;
+    const sx = 8, sy = dual ? S - 30 : S - 10;
+    ctx.strokeStyle = 'rgba(244,242,233,0.9)'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(sx, sy - 4); ctx.lineTo(sx, sy); ctx.lineTo(sx + px, sy); ctx.lineTo(sx + px, sy - 4); ctx.stroke();
+    ctx.strokeStyle = '#2d3528'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.font = `600 10px Arial, sans-serif`; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.strokeStyle = 'rgba(244,242,233,0.9)'; ctx.lineWidth = 3; ctx.strokeText(fmtDist(nice), sx + 3, sy - 3);
+    ctx.fillStyle = '#2d3528'; ctx.fillText(fmtDist(nice), sx + 3, sy - 3);
+  });
+
+  // ---------- live layer (canvas, rAF) ----------
+  useEffect(() => {
+    let raf = 0;
+    const cv = liveRef.current!; cv.width = Math.round(S * dpr); cv.height = Math.round(S * dpr);
+    const ctx = cv.getContext('2d')!;
+    const frame = () => {
+      raf = requestAnimationFrame(frame);
+      drawLive(ctx, S, dpr, map, viewRef.current, compact);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [S, dpr, map, compact]);
+
+  // ---------- interaction ----------
+  const ptrs = useRef(new Map<number, { x: number; y: number; type: string }>());
+  const gesture = useRef<{ kind: 'none' | 'tap' | 'pan' | 'pinch' | 'dead'; sx: number; sy: number; v0: ViewState; d0?: number; m0?: V2; n0?: V2; t: number }>({ kind: 'none', sx: 0, sy: 0, v0: view, t: 0 });
+  const lastTap = useRef({ t: 0, x: 0, y: 0 });
+  const elRef = useRef<HTMLDivElement>(null);
+
+  const local = (e: { clientX: number; clientY: number }): V2 => {
+    const r = elRef.current!.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  const panAllowed = () => {
+    const s = getState();
+    if (!interactive) return true;
+    if (s.freePan) return true;
+    return s.tool === 'select' || s.tool === 'layers';
+  };
+
+  const onDown = (e: React.PointerEvent) => {
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    const p = local(e);
+    ptrs.current.set(e.pointerId, { x: p[0], y: p[1], type: e.pointerType });
+    const g = gesture.current;
+    if (ptrs.current.size === 2) {
+      const [a, b] = [...ptrs.current.values()];
+      const m: V2 = [(a.x + b.x) / 2, (a.y + b.y) / 2];
+      gesture.current = { kind: 'pinch', sx: m[0], sy: m[1], v0: viewRef.current, d0: Math.hypot(a.x - b.x, a.y - b.y), m0: m, n0: fromS(m), t: Date.now() };
+    } else if (ptrs.current.size === 1) {
+      gesture.current = { kind: 'tap', sx: p[0], sy: p[1], v0: viewRef.current, t: Date.now() };
+    } else { g.kind = 'dead'; }
+  };
+  const onMove = (e: React.PointerEvent) => {
+    const p = local(e);
+    if (interactive && e.pointerType === 'mouse' && ptrs.current.size === 0) {
+      const s = getState();
+      if (s.draft || (s.tool === 'ruler' && s.ruler)) setState({ hover: { map, w: normToCanon(map, fromS(p)) } });
+    }
+    if (!ptrs.current.has(e.pointerId)) return;
+    ptrs.current.set(e.pointerId, { x: p[0], y: p[1], type: e.pointerType });
+    const g = gesture.current;
+    if (g.kind === 'pinch' && ptrs.current.size >= 2) {
+      const [a, b] = [...ptrs.current.values()];
+      const m: V2 = [(a.x + b.x) / 2, (a.y + b.y) / 2];
+      const d = Math.hypot(a.x - b.x, a.y - b.y);
+      const z = Math.min(ZMAX[map], Math.max(1, g.v0.z * d / (g.d0 || 1)));
+      setView({ z, cx: g.n0![0] - (m[0] - S / 2) / (S * z), cy: g.n0![1] - (m[1] - S / 2) / (S * z) });
+      return;
+    }
+    const moved = Math.hypot(p[0] - g.sx, p[1] - g.sy);
+    const thr = e.pointerType === 'mouse' ? 4 : 9;
+    if (g.kind === 'tap' && moved > thr) g.kind = panAllowed() ? 'pan' : 'dead';
+    if (g.kind === 'pan') {
+      const v0 = g.v0;
+      setView({ ...v0, cx: v0.cx - (p[0] - g.sx) / (S * v0.z), cy: v0.cy - (p[1] - g.sy) / (S * v0.z) });
+    }
+  };
+  const onUp = (e: React.PointerEvent) => {
+    const p = local(e);
+    const g = gesture.current;
+    ptrs.current.delete(e.pointerId);
+    if (g.kind === 'pinch') { if (ptrs.current.size === 0) g.kind = 'none'; else g.kind = 'dead'; return; }
+    if (g.kind === 'tap' && ptrs.current.size === 0) {
+      g.kind = 'none';
+      if (!interactive) return;
+      const now = Date.now();
+      const dbl = now - lastTap.current.t < 330 && Math.hypot(p[0] - lastTap.current.x, p[1] - lastTap.current.y) < 14;
+      lastTap.current = { t: now, x: p[0], y: p[1] };
+      const w = normToCanon(map, fromS(p));
+      const s = getState();
+      const hit = s.tool === 'select' || s.tool === 'layers' ? hitTest(s.drawings, map, p, wToS, s.layers.drawings) : null;
+      tapMap(map, w, hit, dbl);
+      if (e.pointerType !== 'mouse') setState({ hover: null });
+    }
+    if (ptrs.current.size === 0) g.kind = 'none';
+  };
+  const onWheel = (e: React.WheelEvent) => {
+    const p = local(e);
+    const v = viewRef.current;
+    const n = fromS(p);
+    const z = Math.min(ZMAX[map], Math.max(1, v.z * Math.pow(1.0018, -e.deltaY)));
+    setView({ z, cx: n[0] - (p[0] - S / 2) / (S * z), cy: n[1] - (p[1] - S / 2) / (S * z) });
+  };
+  useEffect(() => {
+    const el = elRef.current; if (!el) return;
+    const prevent = (ev: WheelEvent) => ev.preventDefault();
+    el.addEventListener('wheel', prevent, { passive: false });
+    return () => el.removeEventListener('wheel', prevent);
+  }, []);
+
+  const zoomBy = (k: number) => { const v = viewRef.current; setView({ ...v, z: Math.min(ZMAX[map], Math.max(1, v.z * k)) }); };
+  const centerSelf = () => {
+    const me = getSnapshot().friends.find((f) => f.self);
+    if (!me) return;
+    const n = canonToNorm(map, me.w);
+    const v = viewRef.current;
+    setView({ cx: n[0], cy: n[1], z: Math.max(v.z, defaultView(map).z * 1.6) });
+  };
+  const reset = () => setView(defaultView(map));
+
+  const btn = S < 460 ? 26 : 30;
+  const cursor = interactive && tool !== 'select' && tool !== 'layers' ? 'crosshair' : (moving ? 'copy' : 'default');
+
+  return (
+    <div className="mapview" style={{ width: S, height: S }} data-map={map}>
+      <canvas ref={baseRef} className="layer" style={{ width: S, height: S }} />
+      <DrawingsSvg map={map} S={S} view={view} drawings={drawings} wToS={wToS} layers={layers} selectedId={interactive ? selectedId : null} compact={compact}
+        draft={interactive && draft && draft.map === map ? draft : null}
+        ruler={interactive && ruler && ruler.map === map ? ruler.pts : null}
+        hover={interactive && hover && hover.map === map ? hover.w : null}
+        rulerSpeed={rulerSpeed} />
+      <canvas ref={liveRef} className="layer" style={{ width: S, height: S, pointerEvents: 'none' }} />
+      <div ref={elRef} className="layer hit" style={{ cursor }}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}
+        onPointerLeave={(e) => { if (e.pointerType === 'mouse' && ptrs.current.size === 0) setState({ hover: null }); }}
+        onContextMenu={(e) => e.preventDefault()} />
+      {dual && <div className="mapchip">{cfg.title}<span>{cfg.sub}</span></div>}
+      <div className="corner" style={{ gap: compact ? 4 : 6 }}>
+        <button className="cbtn" style={{ width: btn, height: btn }} onClick={() => zoomBy(1.5)} aria-label="放大" title="放大">
+          <svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12" /></svg></button>
+        <button className="cbtn" style={{ width: btn, height: btn }} onClick={() => zoomBy(1 / 1.5)} aria-label="缩小" title="缩小">
+          <svg viewBox="0 0 20 20"><path d="M4 10h12" /></svg></button>
+        <button className="cbtn" style={{ width: btn, height: btn }} onClick={centerSelf} aria-label="居中本人" title="居中本人">
+          <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="4.5" /><path d="M10 1.5v4M10 14.5v4M1.5 10h4M14.5 10h4" /></svg></button>
+        <button className="cbtn" style={{ width: btn, height: btn }} onClick={reset} aria-label="复位视图" title="复位视图">
+          <svg viewBox="0 0 20 20"><path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4" /></svg></button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- hit testing (screen space) ----------
+function hitTest(ds: Drawing[], map: MapId, p: V2, wToS: (w: V2) => V2, visible: boolean): string | null {
+  if (!visible) return null;
+  let best: { id: string; d: number; pri: number } | null = null;
+  const consider = (id: string, d: number, pri: number) => {
+    if (!best || pri < best.pri || (pri === best.pri && d < best.d)) best = { id, d, pri };
+  };
+  for (const d of ds) {
+    if (d.scope !== 'both' && d.scope !== map) continue;
+    const P = d.pts.map((w) => wToS(w));
+    if (d.kind === 'point') { const dd = Math.hypot(P[0][0] - p[0], P[0][1] - p[1]); if (dd < 20) consider(d.id, dd, 0); }
+    else if (d.kind === 'source') { const dd = Math.min(Math.hypot(P[0][0] - p[0], P[0][1] - p[1]), polyDist(p, P)); if (dd < 14) consider(d.id, dd, 1); }
+    else if (d.kind === 'route' || d.kind === 'arrow' || d.kind === 'phase') {
+      const dd = polyDist(p, d.smooth ? sampleSmooth(P) : P); if (dd < (d.kind === 'arrow' ? 16 : 12)) consider(d.id, dd, 1);
+    } else if (d.kind === 'area') {
+      const x0 = Math.min(P[0][0], P[1][0]), x1 = Math.max(P[0][0], P[1][0]), y0 = Math.min(P[0][1], P[1][1]), y1 = Math.max(P[0][1], P[1][1]);
+      const inside = p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1;
+      const edge = Math.min(Math.abs(p[0] - x0), Math.abs(p[0] - x1), Math.abs(p[1] - y0), Math.abs(p[1] - y1));
+      if (inside) consider(d.id, edge < 12 ? edge : 30 + edge, edge < 12 ? 1 : 2);
+    } else if (d.kind === 'circle') {
+      const r = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]);
+      const dc = Math.hypot(p[0] - P[0][0], p[1] - P[0][1]);
+      if (dc <= r + 10) consider(d.id, Math.abs(dc - r), Math.abs(dc - r) < 12 ? 1 : 2);
+    }
+  }
+  return (best as { id: string } | null)?.id ?? null;
+}
+
+// ---------- SVG drawings ----------
+function areaColor(t?: string) { return t === 'recon' ? C.recon : t === 'warning' ? C.enemy : C.order; }
+
+function DrawingsSvg(props: {
+  map: MapId; S: number; view: ViewState; drawings: Drawing[]; wToS: (w: V2, v?: ViewState) => V2; layers: ReturnType<typeof getState>['layers'];
+  selectedId: string | null; compact: boolean; draft: { tool: string; pts: V2[] } | null; ruler: V2[] | null; hover: V2 | null; rulerSpeed: number;
+}) {
+  const { map, S, view, drawings, wToS, layers, selectedId, compact, draft, ruler, hover, rulerSpeed } = props;
+  const [, tick] = useState(0);
+  useEffect(() => { const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, []);
+  const bt = battleTime();
+  const s = getState();
+  const ov = gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * view.z < 240;
+  const fs = compact ? 10 : S >= 600 ? 12 : 11;
+  const hw = ov ? 3.5 : compact ? 6 : S >= 600 ? 9 : 7.5;
+  const gs = ov ? 0.5 : compact ? 0.82 : S >= 600 ? 1.12 : 1;
+  const items = useMemo(() => drawings.filter((d) => d.scope === 'both' || d.scope === map), [drawings, map]);
+  const text = (x: number, y: number, t: string, col: string, anchor: 'start' | 'middle' | 'end' = 'middle', size = fs, weight = 600) => (
+    <text x={x} y={y} textAnchor={anchor} fontSize={size} fontWeight={weight} fill={col} className="halo">{t}</text>
+  );
+
+  const els: JSX.Element[] = [];
+  if (layers.drawings) for (const d of items) {
+    const P = d.pts.map((w) => wToS(w, view));
+    const sel = d.id === selectedId;
+    const dash = d.status === 'planned' ? '7 5' : undefined;
+    const key = d.id;
+    const age = bt - d.t;
+    const timeTxt = layers.time && d.showTime ? (d.kind === 'point' && d.cat === 'enemy' ? '发现 ' : d.kind === 'source' ? '' : '') + fmtClock(d.t) : null;
+    const showLabels = layers.labels && !ov;
+    if (d.kind === 'point') {
+      const [x, y] = P[0];
+      if (x < -30 || y < -30 || x > S + 30 || y > S + 30) continue;
+      const fade = d.cat === 'enemy' ? Math.max(0.38, 1 - Math.max(0, age - 30) / 240) : 1;
+      els.push(
+        <g key={key} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`} opacity={fade}>
+          {sel && <circle r={20} fill="rgba(30,34,28,0.08)" stroke={C.ink} strokeWidth={1.4} strokeDasharray="3 3" />}
+          <PointGlyph cat={d.cat!} status={d.status} s={gs} />
+          {showLabels && d.label && text(0, compact ? 22 : 26, d.label, C.ink)}
+          {timeTxt && !ov && text(0, (d.label && showLabels ? (compact ? 33 : 38) : (compact ? 22 : 26)), timeTxt + (age > 120 ? ' · 陈旧' : ''), d.cat === 'enemy' ? C.enemy : C.ink, 'middle', fs - 1, 600)}
+        </g>,
+      );
+    } else if (d.kind === 'route' || d.kind === 'phase' || d.kind === 'arrow') {
+      const Q = d.smooth && d.kind !== 'phase' ? sampleSmooth(P) : P;
+      if (d.kind === 'arrow') {
+        const dd = attackArrowD(Q, hw);
+        els.push(<g key={key}>
+          {sel && <path d={dd} fill="none" stroke={C.ink} strokeWidth={5} strokeOpacity={0.25} strokeLinejoin="round" />}
+          <path d={dd} fill={C.order} fillOpacity={0.18} stroke={C.order} strokeWidth={2} strokeDasharray={dash} strokeLinejoin="round" />
+          {showLabels && d.label && (() => { const m = Q[Math.floor(Q.length / 2)]; return text(m[0], m[1] - hw - 6, d.label, C.order, 'middle', fs, 700); })()}
+          {sel && P.map((p, i) => <rect key={i} x={p[0] - 3.5} y={p[1] - 3.5} width={7} height={7} fill="#fff" stroke={C.ink} strokeWidth={1.2} />)}
+        </g>);
+      } else if (d.kind === 'route') {
+        const body = trimEnd(Q, 6);
+        els.push(<g key={key}>
+          <path d={polyD(body)} fill="none" stroke={C.halo} strokeWidth={sel ? 8 : 5.5} strokeLinejoin="round" strokeLinecap="round" />
+          {sel && <path d={polyD(body)} fill="none" stroke={C.ink} strokeOpacity={0.25} strokeWidth={8} strokeLinejoin="round" />}
+          <path d={polyD(body)} fill="none" stroke={C.order} strokeWidth={2.6} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" />
+          <path d={headD(Q, 13, 10)} fill={C.order} stroke={C.halo} strokeWidth={1} />
+          {showLabels && d.label && text(Q[0][0], Q[0][1] - 9, d.label, C.order, 'middle', fs, 700)}
+          {sel && P.map((p, i) => <rect key={i} x={p[0] - 3.5} y={p[1] - 3.5} width={7} height={7} fill="#fff" stroke={C.ink} strokeWidth={1.2} />)}
+        </g>);
+      } else {
+        els.push(<g key={key}>
+          <path d={polyD(Q)} fill="none" stroke={C.halo} strokeWidth={sel ? 8 : 5} strokeLinejoin="round" />
+          {sel && <path d={polyD(Q)} fill="none" stroke={C.ink} strokeOpacity={0.25} strokeWidth={8} />}
+          <path d={polyD(Q)} fill="none" stroke={C.phase} strokeWidth={2.4} strokeDasharray="10 6" strokeLinejoin="round" />
+          {showLabels && text(Q[0][0], Q[0][1] - 8, d.label || 'PL', C.phase, 'middle', fs, 700)}
+          {showLabels && text(Q[Q.length - 1][0], Q[Q.length - 1][1] + 15, d.label || 'PL', C.phase, 'middle', fs, 700)}
+          {sel && P.map((p, i) => <rect key={i} x={p[0] - 3.5} y={p[1] - 3.5} width={7} height={7} fill="#fff" stroke={C.ink} strokeWidth={1.2} />)}
+        </g>);
+      }
+    } else if (d.kind === 'area') {
+      const col = areaColor(d.areaType);
+      const x0 = Math.min(P[0][0], P[1][0]), y0 = Math.min(P[0][1], P[1][1]);
+      const w = Math.abs(P[1][0] - P[0][0]), h = Math.abs(P[1][1] - P[0][1]);
+      els.push(<g key={key}>
+        {sel && <rect x={x0 - 3} y={y0 - 3} width={w + 6} height={h + 6} fill="none" stroke={C.ink} strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 3" />}
+        <rect x={x0} y={y0} width={w} height={h} fill={d.areaType === 'airstrike' ? `url(#hatch-${map})` : col} fillOpacity={d.areaType === 'airstrike' ? 1 : 0.1} stroke={col} strokeWidth={1.8} strokeDasharray={dash ?? (d.areaType === 'warning' ? '2 0' : undefined)} />
+        {showLabels && text(x0 + 4, y0 + fs + 2, d.label || '', col, 'start', fs, 700)}
+      </g>);
+    } else if (d.kind === 'circle') {
+      const col = areaColor(d.areaType);
+      const r = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]);
+      const meters = dist(d.pts[0], d.pts[1]) * metersPerCanon(map);
+      els.push(<g key={key}>
+        {sel && <circle cx={P[0][0]} cy={P[0][1]} r={r + 3} fill="none" stroke={C.ink} strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 3" />}
+        <circle cx={P[0][0]} cy={P[0][1]} r={r} fill={d.areaType === 'airstrike' ? `url(#hatch-${map})` : col} fillOpacity={d.areaType === 'airstrike' ? 1 : 0.1} stroke={col} strokeWidth={1.8} strokeDasharray={dash} />
+        <circle cx={P[0][0]} cy={P[0][1]} r={2.5} fill={col} />
+        {showLabels && text(P[0][0], P[0][1] - r - 5, `${d.label} · r ${fmtDist(meters)}`, col, 'middle', fs, 700)}
+      </g>);
+    } else if (d.kind === 'source') {
+      const o = P[0], q = P[1];
+      const brg = bearingDeg(d.pts[0], d.pts[1]);
+      const r = Math.max(24, Math.hypot(q[0] - o[0], q[1] - o[1]));
+      const half = ((d.sector ?? 0) / 2) * Math.PI / 180;
+      const a = brg * Math.PI / 180;
+      // arrow from source toward hit point
+      const ux = Math.sin(a), uy = -Math.cos(a);
+      const start: V2 = [o[0] + ux * r, o[1] + uy * r];
+      const end: V2 = [o[0] + ux * 13, o[1] + uy * 13];
+      els.push(<g key={key}>
+        {half > 0 && <path d={wedgeD(o, a, half, r)} fill={C.enemy} fillOpacity={0.09} stroke={C.enemy} strokeOpacity={0.7} strokeWidth={1.2} strokeDasharray="5 4" />}
+        {sel && <circle cx={o[0]} cy={o[1]} r={16} fill="none" stroke={C.ink} strokeWidth={1.4} strokeDasharray="3 3" />}
+        <path d={polyD([start, end])} stroke={C.halo} strokeWidth={5} />
+        <path d={polyD([start, trimEnd([start, end], 8)[1]])} stroke={C.enemy} strokeWidth={2.2} strokeDasharray="6 4" />
+        <path d={headD([start, end], 11, 9)} fill={C.enemy} />
+        <path d={`M${o[0] - 6} ${o[1] - 6}L${o[0] + 6} ${o[1] + 6}M${o[0] + 6} ${o[1] - 6}L${o[0] - 6} ${o[1] + 6}`} stroke={C.halo} strokeWidth={5} />
+        <path d={`M${o[0] - 6} ${o[1] - 6}L${o[0] + 6} ${o[1] + 6}M${o[0] + 6} ${o[1] - 6}L${o[0] - 6} ${o[1] + 6}`} stroke={C.enemy} strokeWidth={2.4} />
+        {showLabels && text(start[0], start[1] + (uy > 0 ? 14 : -7), `${d.label || '未确认'} · ${fmtBearing(brg)}`, C.enemy, 'middle', fs, 700)}
+        {layers.time && d.showTime && text(o[0], o[1] + 20, fmtClock(d.t), C.enemy, 'middle', fs - 1, 600)}
+      </g>);
+    }
+  }
+
+  // ---- draft preview ----
+  if (draft) {
+    const P = draft.pts.map((w) => wToS(w, view));
+    const lastD = draft.pts[draft.pts.length - 1];
+    const H = hover && (!lastD || dist(hover, lastD) > 2) ? wToS(hover, view) : null;
+    const st = s;
+    if (draft.tool === 'route') {
+      const all = H ? [...P, H] : P;
+      const Q = st.smooth && st.routeType !== 'phase' ? sampleSmooth(all) : all;
+      const col = st.routeType === 'phase' ? C.phase : C.order;
+      if (st.routeType === 'arrow' && Q.length >= 2) els.push(<path key="dr-a" d={attackArrowD(Q, hw)} fill={C.order} fillOpacity={0.12} stroke={C.order} strokeWidth={1.6} strokeDasharray="5 4" />);
+      else els.push(<path key="dr-l" d={polyD(Q)} fill="none" stroke={col} strokeWidth={2.2} strokeDasharray="6 5" />);
+      if (st.routeType === 'route' && Q.length >= 2) els.push(<path key="dr-h" d={headD(Q, 12, 9)} fill={C.order} opacity={0.8} />);
+      P.forEach((p, i) => els.push(<circle key={'dv' + i} cx={p[0]} cy={p[1]} r={i === P.length - 1 ? 5 : 4} fill="#fff" stroke={col} strokeWidth={2} />));
+    } else if (draft.tool === 'area' && P[0]) {
+      const col = areaColor(st.areaType);
+      if (H) {
+        if (st.areaShape === 'rect') els.push(<rect key="da" x={Math.min(P[0][0], H[0])} y={Math.min(P[0][1], H[1])} width={Math.abs(H[0] - P[0][0])} height={Math.abs(H[1] - P[0][1])} fill={col} fillOpacity={0.08} stroke={col} strokeWidth={1.6} strokeDasharray="5 4" />);
+        else els.push(<circle key="da" cx={P[0][0]} cy={P[0][1]} r={Math.hypot(H[0] - P[0][0], H[1] - P[0][1])} fill={col} fillOpacity={0.08} stroke={col} strokeWidth={1.6} strokeDasharray="5 4" />);
+      }
+      els.push(<circle key="da0" cx={P[0][0]} cy={P[0][1]} r={5} fill="#fff" stroke={col} strokeWidth={2} />);
+    } else if (draft.tool === 'source' && P[0]) {
+      const o = P[0];
+      els.push(<circle key="ds-r" cx={o[0]} cy={o[1]} r={18} fill="none" stroke={C.enemy} strokeWidth={1.2} strokeDasharray="3 3" className="pulse" />);
+      els.push(<path key="ds-x" d={`M${o[0] - 6} ${o[1] - 6}L${o[0] + 6} ${o[1] + 6}M${o[0] + 6} ${o[1] - 6}L${o[0] - 6} ${o[1] + 6}`} stroke={C.enemy} strokeWidth={2.4} />);
+      if (H) {
+        const a = Math.atan2(H[0] - o[0], -(H[1] - o[1]));
+        const r = Math.hypot(H[0] - o[0], H[1] - o[1]);
+        const half = (st.sourceSector / 2) * Math.PI / 180;
+        if (half > 0) els.push(<path key="ds-w" d={wedgeD(o, a, half, r)} fill={C.enemy} fillOpacity={0.07} stroke={C.enemy} strokeOpacity={0.6} strokeDasharray="5 4" />);
+        els.push(<path key="ds-l" d={polyD([H, o])} stroke={C.enemy} strokeWidth={1.8} strokeDasharray="6 4" />);
+      }
+    }
+  }
+
+  // ---- ruler (local tool) ----
+  if (ruler && ruler.length) {
+    const lastR = ruler[ruler.length - 1];
+    const all = hover && dist(hover, lastR) > 2 ? [...ruler, hover] : ruler;
+    const P = all.map((w) => wToS(w, view));
+    const mpc = metersPerCanon(map);
+    let total = 0;
+    els.push(<path key="ru-h" d={polyD(P)} fill="none" stroke={C.halo} strokeWidth={5} />);
+    els.push(<path key="ru" d={polyD(P)} fill="none" stroke="#1f2420" strokeWidth={1.8} />);
+    for (let i = 1; i < all.length; i++) {
+      const m = dist(all[i - 1], all[i]) * mpc; total += m;
+      const mid: V2 = [(P[i - 1][0] + P[i][0]) / 2, (P[i - 1][1] + P[i][1]) / 2];
+      els.push(<g key={'rs' + i}>{text(mid[0], mid[1] - 6, `${fmtDist(m)} · ${fmtBearing(bearingDeg(all[i - 1], all[i]))}`, '#1f2420', 'middle', fs - 1, 600)}</g>);
+    }
+    P.forEach((p, i) => els.push(<circle key={'rv' + i} cx={p[0]} cy={p[1]} r={3.5} fill="#fff" stroke="#1f2420" strokeWidth={1.5} />));
+    if (all.length > 1) {
+      const last = P[P.length - 1];
+      const eta = total / (rulerSpeed / 3.6);
+      els.push(<g key="rt">{text(last[0] + 8, last[1] + 16, `共 ${fmtDist(total)} · ETA ${fmtClock(eta)}`, '#1f2420', 'start', fs, 700)}</g>);
+    }
+  }
+
+  return (
+    <svg className="layer" width={S} height={S} style={{ pointerEvents: 'none' }}>
+      <defs>
+        <pattern id={`hatch-${map}`} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect width="8" height="8" fill={C.order} fillOpacity="0.06" />
+          <line x1="0" y1="0" x2="0" y2="8" stroke={C.order} strokeOpacity="0.35" strokeWidth="1.4" />
+        </pattern>
+      </defs>
+      {els}
+    </svg>
+  );
+}
+
+// ---------- live drawing (canvas) ----------
+function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: MapId, v: ViewState, compact: boolean) {
+  const s = getState();
+  const snap = getSnapshot();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, S, S);
+  const toS = (w: V2): V2 => { const n = canonToNorm(map, w); return [(n[0] - v.cx) * S * v.z + S / 2, (n[1] - v.cy) * S * v.z + S / 2]; };
+  const inView = (p: V2, m = 24) => p[0] > -m && p[1] > -m && p[0] < S + m && p[1] < S + m;
+  const now = performance.now();
+  const font = (px: number, w = 600) => `${w} ${px}px "Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif`;
+  const label = (t: string, x: number, y: number, col: string, px = compact ? 10 : 11, align: CanvasTextAlign = 'center') => {
+    ctx.font = font(px); ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(246,244,236,0.92)'; ctx.lineWidth = 3.2; ctx.strokeText(t, x, y);
+    ctx.fillStyle = col; ctx.fillText(t, x, y);
+  };
+  const sprite = (sidc: string, size: number, x: number, y: number, opt: Parameters<typeof unitSprite>[2] = {}, alpha = 1) => {
+    const sp = unitSprite(sidc, size, opt, dpr);
+    if (!sp.c) return sp;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(sp.c, x - sp.ax, y - sp.ay, sp.w, sp.h);
+    ctx.globalAlpha = 1;
+    return sp;
+  };
+  const cellPx = gridBox(map).stepX * S * v.z;
+  const usz = S >= 600 ? 21 : S >= 420 ? 18 : 15;
+  // air overview: the ground battle area is tiny → shrink ground objects, hide their labels (plan §5.3)
+  const ov = gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * v.z < 240;
+
+  // static objects: friendly airfield + bombing points
+  if (snap.airfield && map === 'air') {
+    const a = toS(snap.airfield[0]), b = toS(snap.airfield[1]);
+    if (inView(a)) {
+      ctx.strokeStyle = 'rgba(246,244,236,0.9)'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      ctx.strokeStyle = '#174DFF'; ctx.lineWidth = 3; ctx.stroke(); ctx.lineCap = 'butt';
+    }
+  }
+  if (s.policy !== 'off' && s.layers.enemy && map === 'air') for (const bp of snap.bombing) {
+    const p = toS(bp); if (!inView(p)) continue;
+    ctx.strokeStyle = C.enemy; ctx.lineWidth = 1.5; ctx.strokeRect(p[0] - 4, p[1] - 4, 8, 8);
+  }
+
+  // enemies (auto layer, filtered by enemyPolicy)
+  if (s.policy !== 'off' && s.layers.enemy) {
+    for (const c of snap.contacts) {
+      if (!c.visible && s.policy !== 'fused') continue;
+      if (c.only && c.only !== map) continue;
+      const p = toS(c.w);
+      if (!inView(p, 60)) continue;
+      const sidc = ICON_SIDC[c.icon] ?? 'SHGPU-----';
+      const sz = c.air ? usz : ov ? 10 : usz - 2;
+      const rr = sz * 0.72;
+      if (c.visible) {
+        if (c.reveal === 'hit') {
+          // brief flash: expanding ring + blink
+          const ph = (c.sinceMs % 900) / 900;
+          ctx.strokeStyle = `rgba(200,40,28,${0.85 * (1 - ph)})`; ctx.lineWidth = 2.5;
+          ctx.beginPath(); ctx.arc(p[0], p[1], rr + ph * rr * 1.8, 0, Math.PI * 2); ctx.stroke();
+          const on = Math.floor(now / 180) % 2 === 0;
+          sprite(sidc, sz, p[0], p[1], { dashed: true }, on ? 1 : 0.35);
+          if (!ov) label('命中暴露', p[0], p[1] + sz + 2, C.enemy, compact ? 9 : 10);
+          continue;
+        }
+        if (c.reveal === 'scouted') {
+          const rem = Math.max(0, (c.remainMs ?? 0) / 30000);
+          ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(200,40,28,0.85)'; ctx.lineWidth = 1.6;
+          const R2 = rr * 1.45;
+          ctx.beginPath(); ctx.arc(p[0], p[1], R2, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+          ctx.strokeStyle = C.enemy; ctx.lineWidth = ov ? 2 : 3;
+          ctx.beginPath(); ctx.arc(p[0], p[1], R2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rem); ctx.stroke();
+          if (!ov) label(`侦察 ${Math.ceil((c.remainMs ?? 0) / 1000)}s`, p[0], p[1] + R2 + 9, C.enemy, compact ? 9 : 10);
+        }
+        if (c.blink === 2 && c.reveal !== 'air') {
+          const ph = (Math.sin(now / 160) + 1) / 2;
+          ctx.strokeStyle = `rgba(240,12,0,${0.35 + 0.5 * ph})`; ctx.lineWidth = ov ? 1.4 : 2;
+          ctx.beginPath(); ctx.arc(p[0], p[1], rr + 1 + ph * 3, 0, Math.PI * 2); ctx.stroke();
+        }
+        if (c.air && c.hdg != null) {
+          const a = c.hdg * Math.PI / 180;
+          ctx.strokeStyle = C.enemy; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] + Math.sin(a) * 17, p[1] - Math.cos(a) * 17); ctx.stroke();
+        }
+        sprite(sidc, sz, p[0], p[1], { dashed: true });
+        if (!ov && cellPx > 150 && s.layers.labels && c.reveal !== 'scouted') label(ICON_ZH[c.icon] ?? c.icon, p[0], p[1] + sz - 1, C.enemy, compact ? 9 : 10);
+      } else {
+        // ghost / last known (fused only)
+        const life = c.air ? 15000 : 30000;
+        const k = 1 - c.ageMs / life;
+        if (c.air && c.hdg != null) {
+          const a = c.hdg * Math.PI / 180;
+          const sp = (c.speed ?? 0);
+          const sec = c.ageMs / 1000;
+          const pw: V2 = [c.w[0] + Math.sin(a) * sp * sec, c.w[1] - Math.cos(a) * sp * sec];
+          const pp = toS(pw);
+          const rl = 8 + Math.hypot(pp[0] - p[0], pp[1] - p[1]) * 0.45, rw = 6 + rl * 0.45;
+          ctx.save(); ctx.translate(pp[0], pp[1]); ctx.rotate(a);
+          ctx.fillStyle = `rgba(200,40,28,${0.10 * k})`; ctx.strokeStyle = `rgba(200,40,28,${0.6 * k})`; ctx.setLineDash([3, 3]); ctx.lineWidth = 1.2;
+          ctx.beginPath(); ctx.ellipse(0, 0, rw, rl, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); ctx.restore(); ctx.setLineDash([]);
+          ctx.strokeStyle = `rgba(200,40,28,${0.5 * k})`; ctx.setLineDash([2, 3]);
+          ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(pp[0], pp[1]); ctx.stroke(); ctx.setLineDash([]);
+        }
+        ctx.globalAlpha = Math.max(0.15, k);
+        ctx.setLineDash([3, 2.5]); ctx.strokeStyle = C.enemy; ctx.lineWidth = 1.5; ctx.fillStyle = 'rgba(246,244,236,0.55)';
+        const r = c.air ? sz * 0.45 : ov ? 5 : sz * 0.5;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1] - r); ctx.lineTo(p[0] + r, p[1]); ctx.lineTo(p[0], p[1] + r); ctx.lineTo(p[0] - r, p[1]); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        if (!ov || c.air) label(`${Math.floor(c.ageMs / 1000)}s`, p[0], p[1] + r + 8, `rgba(200,40,28,${Math.max(0.4, k)})`, compact ? 9 : 10);
+      }
+    }
+  }
+
+  // friendlies
+  if (s.layers.friendly) {
+    const fr = [...snap.friends].sort((a, b) => Number(a.self) - Number(b.self));
+    for (const f of fr) {
+      const p = toS(f.w);
+      if (!inView(p)) continue;
+      const stale = !f.alive || f.ageMs > 2000;
+      const col = stale ? C.stale : f.self ? '#b8890a' : C.friend;
+      const small = ov && !f.air;
+      if (!stale) {
+        const a = f.hdg * Math.PI / 180;
+        const L = small ? 11 : usz + 4;
+        const tip: V2 = [p[0] + Math.sin(a) * L, p[1] - Math.cos(a) * L];
+        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke();
+        ctx.strokeStyle = f.self ? '#d9a100' : C.friend; ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke(); ctx.lineCap = 'butt';
+        const hx = Math.sin(a), hy = -Math.cos(a);
+        ctx.fillStyle = f.self ? '#d9a100' : C.friend;
+        const hs = small ? 3 : 4.5;
+        ctx.beginPath(); ctx.moveTo(tip[0] + hx * hs * 1.1, tip[1] + hy * hs * 1.1); ctx.lineTo(tip[0] - hy * hs, tip[1] + hx * hs); ctx.lineTo(tip[0] + hy * hs, tip[1] - hx * hs); ctx.closePath(); ctx.fill();
+      }
+      const sp = sprite(f.sidc, small ? (f.self ? 13 : 11) : f.self ? usz + 2 : usz, p[0], p[1], { fill: f.self ? C.self : undefined, grey: stale }, stale ? 0.75 : 1);
+      if (s.layers.labels && (!small || f.self)) {
+        const t = stale ? `${f.nick} · ${f.alive ? '' : '阵亡 '}${Math.floor(f.ageMs / 1000)}s` : f.nick;
+        label(t, p[0], p[1] + sp.h - sp.ay + 7, col, S >= 600 ? 12 : compact ? 10 : 11);
+      }
+    }
+  }
+}

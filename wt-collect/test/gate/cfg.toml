@@ -1,0 +1,4 @@
+server = "http://127.0.0.1:18199"
+token = "localtesttoken-0123456789abcdef"
+player = "gatetest"
+game_port = 8111

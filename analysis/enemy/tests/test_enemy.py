@@ -1,0 +1,237 @@
+"""Unit tests for enemy parsing. Run:  .venv/bin/python -m unittest discover -s enemy/tests -t .
+Fixtures are verbatim recorded collector records (session 20261010-182921-shengyuan-b6a7)."""
+import gzip, json, math, os, unittest, datetime
+
+from enemy import stream, reveal
+from enemy.model import MapInfo, MapObj, Frame, HudEvent
+from enemy.tracker import EnemyTracker, TrackerConfig
+from enemy.geo import compass, rel, sector_index, heading_from_dir
+from enemy.summary import threat_summary
+from enemy.classify import is_trackable_enemy, is_enemy_rgb
+
+FX = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+def load_fx(name):
+    with gzip.open(os.path.join(FX, name), "rt") as f:
+        return [json.loads(l) for l in f if l.strip()]
+
+
+def run(recs, kind=None):
+    tr = EnemyTracker()
+    frames, huds, snaps = [], [], {}
+    for k, t, v in stream.events(recs):
+        if k == "map_info":
+            tr.set_map_info(v)
+        elif k == "hud":
+            tr.add_hud_event(v); huds.append(v)
+        else:
+            frames.append(v)
+            snaps[t] = [(c.contact_id, c.icon, c.blink, c.visible) for c in tr.update(v)]
+    tr.session_kind = kind or stream.detect_session_kind(frames, huds)[0]
+    tr.finish()
+    return tr, frames, huds, snaps
+
+
+def ms(hms):  # '18:31:55.579' on 2026-10-10 UTC+8 -> epoch ms
+    d = datetime.datetime.strptime("2026-10-10 " + hms, "%Y-%m-%d %H:%M:%S.%f")
+    return int((d - datetime.datetime(1970, 1, 1)).total_seconds() * 1000) - 8 * 3600 * 1000
+
+
+MI = MapInfo((0.0, 0.0), (4096.0, 4096.0), 1, 1)
+
+
+def obj(icon="MediumTank", x=0.5, y=0.5, color="#fa0C00", rgb=(250, 12, 0), blink=0, type_="ground_model", dx=None, dy=None):
+    return MapObj(type_, icon, color, rgb, blink, x, y, dx, dy)
+
+
+PLAYER = obj("Player", 0.5, 0.5, "#faC81E", (250, 200, 30), 0, dx=0.0, dy=-1.0)
+
+
+class TestGeo(unittest.TestCase):
+    def test_compass_convention(self):
+        self.assertAlmostEqual(compass(0, -1), 0.0)      # up on the map = north
+        self.assertAlmostEqual(compass(1, 0), 90.0)
+        self.assertAlmostEqual(compass(0, 1), 180.0)
+        self.assertAlmostEqual(compass(-1, 0), 270.0)
+
+    def test_rel_uses_world_scale(self):
+        mi = MapInfo((-65536, -65536), (65536, 65536))
+        d, b = rel(mi, 0.5, 0.5, 0.5, 0.5 - 1000 / 131072)
+        self.assertAlmostEqual(d, 1000.0, places=6)
+        self.assertAlmostEqual(b, 0.0, places=6)
+        mi2 = MapInfo((0, 0), (2000, 1000))           # non-square: must not use normalized deltas
+        d, b = rel(mi2, 0.5, 0.5, 0.75, 0.0)          # 500 m east, 500 m north
+        self.assertAlmostEqual(b, 45.0, places=6)
+        self.assertAlmostEqual(d, math.hypot(500, 500), places=6)
+
+    def test_sectors(self):
+        self.assertEqual([sector_index(b) for b in (0, 22.4, 22.6, 90, 180, 270, 337.6, 359.9)],
+                         [0, 0, 1, 2, 4, 6, 0, 0])
+
+
+class TestClassify(unittest.TestCase):
+    def test_both_red_shades_are_enemy(self):
+        self.assertTrue(is_enemy_rgb((250, 12, 0)))
+        self.assertTrue(is_enemy_rgb((240, 12, 0)))
+        self.assertFalse(is_enemy_rgb((250, 200, 30)))   # player yellow
+        self.assertFalse(is_enemy_rgb((23, 77, 255)))    # friendly blue
+
+    def test_exclusions(self):
+        self.assertFalse(is_trackable_enemy(obj("BattleShip")))                   # naval (type is ground_model!)
+        self.assertFalse(is_trackable_enemy(obj("bombing_point", type_="bombing_point")))
+        self.assertFalse(is_trackable_enemy(PLAYER))
+        self.assertTrue(is_trackable_enemy(obj("TankDestroyer", color="#f00C00", rgb=(240, 12, 0), blink=2)))
+
+
+class TestGroundTestDrive(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tr, cls.frames, cls.huds, cls.snaps = run(load_fx("ground_testdrive_b6a7.jsonl.gz"))
+        cls.cs = cls.tr.all_contacts()
+
+    def test_session_kind(self):
+        self.assertEqual(self.tr.session_kind, "test_drive")
+
+    def test_eight_targets_no_duplicates(self):
+        self.assertEqual(len(self.cs), 8)
+        self.assertEqual(sorted(c.icon for c in self.cs).count("HeavyTank"), 3)
+        self.assertTrue(all(len(c.visible_spans) == 1 for c in self.cs))
+
+    def test_shade_switch_keeps_identity(self):
+        td = [c for c in self.cs if c.icon == "TankDestroyer"][0]
+        seq = [(b, col) for _, b, col in td.blink_seq]
+        self.assertEqual(seq, [(2, "#f00C00"), (0, "#fa0C00")])
+        dur = (td.blink_seq[1][0] - td.blink_seq[0][0]) / 1000
+        self.assertAlmostEqual(dur, 11.2, delta=0.3)
+
+    def test_shade_and_blink_are_coupled(self):
+        for f in self.frames:
+            for o in f.objects:
+                if o.rgb == (250, 12, 0): self.assertEqual(o.blink, 0)
+                if o.rgb == (240, 12, 0): self.assertEqual(o.blink, 2)
+
+    def test_killed_target_removed_immediately(self):
+        lt = [c for c in self.cs if c.icon == "LightTank"][0]
+        self.assertEqual(lt.last_seen_ms, ms("18:31:55.579"))
+        kill = [e for e in self.huds if e.kind == "kill"]
+        self.assertEqual(len(kill), 1)
+        self.assertIn("T-26", kill[0].msg)
+        self.assertTrue(kill[0].involves_player)
+        self.assertLess(abs(kill[0].t_ms - lt.last_seen_ms), 600)
+        self.assertEqual(lt.blink, 0)          # no blink change on the killing hit
+
+    def test_moving_target_velocity(self):
+        mt = max(self.cs, key=lambda c: c.n_pos_changes)
+        self.assertEqual(mt.icon, "MediumTank")
+        self.assertGreater(mt.n_pos_changes, 50)
+        self.assertIsNotNone(mt.speed_mps)
+
+    def test_bearing_distance_and_summary(self):
+        td = [c for c in self.cs if c.icon == "TankDestroyer"][0]
+        self.assertAlmostEqual(td.distance_m, 94, delta=3)
+        self.assertAlmostEqual(td.bearing_deg, 79.6, delta=1.5)
+        s = threat_summary(self.cs, self.tr.now_ms, stale_horizon_ms=10 ** 9)
+        self.assertEqual(s.dominant_sector, "E")
+
+    def test_player_heading_convention(self):
+        p = [o for o in self.frames[-5].objects if o.icon == "Player"][0]
+        self.assertAlmostEqual(heading_from_dir(p.dx, p.dy), 70.0, delta=2.0)
+
+    def test_reveal_kind_test_drive(self):
+        self.assertTrue(all(c.reveal_kind == "visible_static" for c in self.cs))
+
+
+class TestAirTestFlightGroundTargets(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tr, cls.frames, _, _ = run(load_fx("air_testflight_b6a7_ground_targets.jsonl.gz"), "test_drive")
+        cls.cs = cls.tr.all_contacts()
+
+    def test_aircraft_always_blink2(self):
+        air = [c for c in self.cs if c.type == "aircraft"]
+        self.assertEqual(len(air), 10)
+        self.assertTrue(all({b for _, b, _ in c.blink_seq} == {2} for c in air))
+        self.assertTrue(all(c.heading_deg is not None for c in air))
+
+    def test_new_light_tanks_5s_highlight(self):
+        hl = [c for c in self.cs if c.type == "ground_model" and any(b == 2 for _, b, _ in c.blink_seq)]
+        self.assertEqual(len(hl), 2)
+        for c in hl:
+            t2 = [t for t, b, _ in c.blink_seq if b == 2][0]
+            t0 = [t for t, b, _ in c.blink_seq if b == 0 and t > t2][0]
+            self.assertAlmostEqual((t0 - t2) / 1000, 5.0, delta=0.15)
+
+
+class TestTrackerSynthetic(unittest.TestCase):
+    def feed(self, tr, seq):
+        for t, objs in seq:
+            tr.update(Frame(t, tuple([PLAYER] + objs)))
+
+    def test_reacquire_after_gap(self):
+        tr = EnemyTracker(); tr.set_map_info(MI)
+        seq = [(t, [obj(x=0.6)]) for t in range(0, 2000, 100)]
+        seq += [(t, []) for t in range(2000, 3000, 100)]
+        seq += [(t, [obj(x=0.6 + 10 / 4096)]) for t in range(3000, 4000, 100)]
+        self.feed(tr, seq); tr.finish()
+        cs = tr.all_contacts()
+        self.assertEqual(len(cs), 1)
+        self.assertEqual(len(cs[0].visible_spans), 2)
+
+    def test_stale_flag_and_last_known(self):
+        tr = EnemyTracker(); tr.set_map_info(MI)
+        self.feed(tr, [(t, [obj(x=0.6)]) for t in range(0, 1000, 100)] + [(t, []) for t in range(1000, 2000, 100)])
+        c = tr.live()[0]
+        self.assertFalse(c.visible); self.assertTrue(c.stale)
+        self.assertEqual(c.x, 0.6); self.assertGreater(c.age_ms, 900)
+
+    def test_periodic_jump_same_track(self):
+        # RB scouting: marker "updates periodically" -> frozen 3 s then jumps 40 m
+        tr = EnemyTracker(); tr.set_map_info(MI)
+        seq = [(t, [obj(x=0.6)]) for t in range(0, 3000, 100)]
+        seq += [(t, [obj(x=0.6 + 40 / 4096)]) for t in range(3000, 4000, 100)]
+        self.feed(tr, seq); tr.finish()
+        self.assertEqual(len(tr.all_contacts()), 1)
+
+    def test_two_same_icon_targets_do_not_swap(self):
+        tr = EnemyTracker(); tr.set_map_info(MI)
+        seq = [(t, [obj(x=0.60 + t / 1e6), obj(x=0.62 - t / 1e6)]) for t in range(0, 3000, 100)]
+        self.feed(tr, seq); tr.finish()
+        cs = tr.all_contacts()
+        self.assertEqual(len(cs), 2)
+        self.assertLess(cs[0].x, cs[1].x)
+
+    def test_reveal_rules_battle(self):
+        tr = EnemyTracker(session_kind="battle"); tr.set_map_info(MI)
+        tr.add_hud_event(HudEvent(100_000, 1, "A (T-34) 击毁了 B (Tiger)", True, "kill"))
+        seq = [(t, [obj(x=0.6, color="#f00C00", rgb=(240, 12, 0), blink=2)]) for t in range(100_000, 105_000, 100)]
+        seq += [(t, []) for t in range(105_000, 106_000, 100)]
+        # second target: 30 s, periodic updates every 2 s
+        seq += [(t, [obj("LightTank", x=0.3 + (t - 110_000) // 2000 * 0.002, y=0.3)]) for t in range(110_000, 140_000, 100)]
+        seq += [(t, []) for t in range(140_000, 141_000, 100)]
+        self.feed(tr, seq); tr.finish()
+        a, b = tr.all_contacts()
+        self.assertEqual(a.reveal_kind, "hit_revealed"); self.assertTrue(a.reveal_rule.startswith("R2"))
+        self.assertEqual(b.reveal_kind, "scouted"); self.assertGreaterEqual(b.reveal_confidence, 0.7)
+
+
+
+class TestHudKinds(unittest.TestCase):
+    def test_award_kinds(self):
+        self.assertEqual(stream.hud_kind("собачий_пердёж (M41A1) 获得嘉奖“战场引导×1”"), "scout_award")
+        self.assertEqual(stream.hud_kind("=ITFWT= nickpro77 (T-34-85 (STP)) 获得嘉奖“密接支援×1”"), "scout_kill")
+        self.assertEqual(stream.hud_kind("A (T-34) 的攻击引燃了 B (M16)"), "fire")
+
+    def test_scout_award_marks_scouted(self):
+        tr = EnemyTracker(session_kind="battle"); tr.set_map_info(MI)
+        for t in range(0, 8000, 100):
+            tr.update(Frame(t, (PLAYER, obj(x=0.7))))
+        tr.add_hud_event(HudEvent(8300, 9, "X (M41A1) 获得嘉奖“战场引导×1”", False, "scout_award"))
+        for t in range(8000, 9000, 100):
+            tr.update(Frame(t, (PLAYER,)))
+        tr.finish()
+        self.assertEqual(tr.all_contacts()[0].reveal_kind, "scouted")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,62 @@
+# build outputs
+target/
+node_modules/
+dist/
+!wt-collect/dist/
+wt-collect/dist/*
+!wt-collect/dist/pkg/
+wt-collect/dist/pkg/*
+!wt-collect/dist/pkg/*.tmpl.*
+!wt-collect/dist/pkg/diag.bat
+wt-collect/bin/
+*.zip
+*.deb
+*.exe
+*.dll
+*.pdb
+*.tar.gz
+
+# logs / pids
+logs/
+*.log
+*.pid
+
+# recorded data
+data/
+!web-proto/src/data/
+spool/
+*.jsonl
+wt-data/
+wt-collect/test/win*/
+wt-collect/test/e2e-sessions/
+wt-collect/test/clk-rx/
+wt-collect/test/rtt-rx/
+wt-collect/test/naval-it/
+wt-collect/test/wt-collector.toml
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.pkl
+
+# secrets — never commit
+*.env
+.env*
+!*.env.example
+receiver.env
+.secrets/
+*token*
+*secret*
+id_rsa*
+id_ed25519*
+*_ed25519*
+*.pem
+*.key
+.sync-*.toml
+
+# misc
+*.bak
+*.tmp
+.DS_Store

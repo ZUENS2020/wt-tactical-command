@@ -1,0 +1,2571 @@
+[
+ {
+  "session": "20261010-182921-shengyuan-b6a7",
+  "start": "18:31:37.126",
+  "end": "18:31:59.452",
+  "kind": "test_drive",
+  "kind_reasons": [
+   "max friendly units/frame=0",
+   "zones/respawn objs=none",
+   "live hud PvP lines=0",
+   "live hud kills of bare-named AI targets=1"
+  ],
+  "map_info": {
+   "map_min": [
+    0.0,
+    0.0
+   ],
+   "map_max": [
+    4096.0,
+    4096.0
+   ],
+   "gen": 26,
+   "hud_type": 1
+  },
+  "n_frames": 215,
+  "hud_live": [
+   {
+    "t": "18:31:55.657",
+    "id": 1375,
+    "msg": "┾UMADF┿ 传奇耐摔王无声铃鹿 (东线虎) 击毁了 T-26",
+    "kind": "kill",
+    "player": true
+   }
+  ],
+  "speed_minus1_blips": [
+   "18:31:41.565",
+   "18:31:55.486"
+  ],
+  "variants": [
+   {
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 411,
+    "frames": 211,
+    "tracks": 3
+   },
+   {
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 347,
+    "frames": 212,
+    "tracks": 3
+   },
+   {
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 287,
+    "frames": 177,
+    "tracks": 3
+   },
+   {
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 221,
+    "frames": 125,
+    "tracks": 2
+   },
+   {
+    "type": "ground_model",
+    "icon": "Player",
+    "color": "#faC81E",
+    "rgb": [
+     250,
+     200,
+     30
+    ],
+    "blink": 0,
+    "has_dxdy": true,
+    "icon_bg": "none",
+    "obs": 214,
+    "frames": 214,
+    "tracks": 0
+   },
+   {
+    "type": "ground_model",
+    "icon": "TankDestroyer",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 111,
+    "frames": 111,
+    "tracks": 1
+   },
+   {
+    "type": "ground_model",
+    "icon": "LightTank",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 110,
+    "frames": 110,
+    "tracks": 1
+   },
+   {
+    "type": "ground_model",
+    "icon": "TankDestroyer",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 99,
+    "frames": 99,
+    "tracks": 1
+   },
+   {
+    "type": "ground_model",
+    "icon": "LightTank",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 71,
+    "frames": 71,
+    "tracks": 1
+   }
+  ],
+  "threat_summary_sample": {
+   "t_ms": 1791628308287,
+   "n_visible": 8,
+   "n_stale": 0,
+   "sectors": [
+    0,
+    0,
+    6,
+    1,
+    1,
+    0,
+    0,
+    0
+   ],
+   "sectors_visible": [
+    0,
+    0,
+    6,
+    1,
+    1,
+    0,
+    0,
+    0
+   ],
+   "nearest_id": 8,
+   "nearest_distance_m": 93.98285433156674,
+   "nearest_bearing_deg": 79.61273868379072,
+   "nearest_sector": "E",
+   "dominant_sector": "E",
+   "t": "18:31:48.287"
+  },
+  "contacts": [
+   {
+    "contact_id": 1,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:31:37.453",
+    "last_seen": "18:31:55.579",
+    "lifetime_s": 18.13,
+    "spans": [
+     [
+      "18:31:37.453",
+      18.13
+     ]
+    ],
+    "n_obs": 181,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 18.13,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.476035,
+     0.564365
+    ],
+    "last_world": [
+     1949.8,
+     2311.6
+    ],
+    "distance_m": 219.3,
+    "bearing_deg": 91.5,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.453",
+      "t_ms": 1791628297453,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 0.31,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 21.0
+     },
+     {
+      "t": "18:31:37.763",
+      "t_ms": 1791628297763,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 11.13,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 21.0
+     },
+     {
+      "t": "18:31:48.892",
+      "t_ms": 1791628308892,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 6.69,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 19.8
+     }
+    ],
+    "disappeared_before_segment_end": true,
+    "kill_hud_near_disappearance": [
+     1375
+    ],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 2,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:31:37.560",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.22,
+    "spans": [
+     [
+      "18:31:37.560",
+      21.22
+     ]
+    ],
+    "n_obs": 212,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 21.22,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.518198,
+     0.55946
+    ],
+    "last_world": [
+     2122.5,
+     2291.5
+    ],
+    "distance_m": 392.2,
+    "bearing_deg": 87.9,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.560",
+      "t_ms": 1791628297560,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 0.2,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 17.7
+     },
+     {
+      "t": "18:31:37.763",
+      "t_ms": 1791628297763,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 11.13,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 17.7
+     },
+     {
+      "t": "18:31:48.892",
+      "t_ms": 1791628308892,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 9.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 16.2
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 3,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:31:37.560",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.22,
+    "spans": [
+     [
+      "18:31:37.560",
+      21.22
+     ]
+    ],
+    "n_obs": 212,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 21.22,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.566089,
+     0.55238
+    ],
+    "last_world": [
+     2318.7,
+     2262.5
+    ],
+    "distance_m": 589.6,
+    "bearing_deg": 85.8,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.560",
+      "t_ms": 1791628297560,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 0.2,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 15.6
+     },
+     {
+      "t": "18:31:37.763",
+      "t_ms": 1791628297763,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 11.13,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 15.6
+     },
+     {
+      "t": "18:31:48.892",
+      "t_ms": 1791628308892,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 9.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 14.1
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 4,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:31:37.655",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.13,
+    "spans": [
+     [
+      "18:31:37.655",
+      21.13
+     ]
+    ],
+    "n_obs": 211,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 21.13,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.613794,
+     0.543762
+    ],
+    "last_world": [
+     2514.1,
+     2227.2
+    ],
+    "distance_m": 787.4,
+    "bearing_deg": 84.3,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.655",
+      "t_ms": 1791628297655,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 11.13,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 14.2
+     },
+     {
+      "t": "18:31:48.783",
+      "t_ms": 1791628308783,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 10.0,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 12.6
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 5,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:31:37.655",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.13,
+    "spans": [
+     [
+      "18:31:37.655",
+      21.13
+     ]
+    ],
+    "n_obs": 211,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 21.13,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.493518,
+     0.742864
+    ],
+    "last_world": [
+     2021.4,
+     3042.8
+    ],
+    "distance_m": 792.3,
+    "bearing_deg": 158.5,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.655",
+      "t_ms": 1791628297655,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 21.13,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 88.0
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 6,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:31:37.763",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.02,
+    "spans": [
+     [
+      "18:31:37.763",
+      21.02
+     ]
+    ],
+    "n_obs": 210,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 21.02,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.709316,
+     0.527698
+    ],
+    "last_world": [
+     2905.4,
+     2161.5
+    ],
+    "distance_m": 1183.5,
+    "bearing_deg": 83.0,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.763",
+      "t_ms": 1791628297763,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 1.29,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 12.9
+     },
+     {
+      "t": "18:31:39.051",
+      "t_ms": 1791628299051,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 11.23,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 11.3
+     },
+     {
+      "t": "18:31:50.284",
+      "t_ms": 1791628310284,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 8.5,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 11.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 7,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:31:37.763",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.02,
+    "spans": [
+     [
+      "18:31:37.763",
+      21.02
+     ]
+    ],
+    "n_obs": 210,
+    "n_pos_changes": 93,
+    "pos_change_ratio": 0.445,
+    "max_static_s": 6.12,
+    "speed_mps": 2.85,
+    "course_deg": 304.9,
+    "heading_deg": null,
+    "last_norm": [
+     0.489508,
+     0.666534
+    ],
+    "last_world": [
+     2005.0,
+     2730.1
+    ],
+    "distance_m": 505.3,
+    "bearing_deg": 147.1,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.763",
+      "t_ms": 1791628297763,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 13.42,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 74.8
+     },
+     {
+      "t": "18:31:51.182",
+      "t_ms": 1791628311182,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 6.7,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 73.7
+     },
+     {
+      "t": "18:31:57.881",
+      "t_ms": 1791628317881,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 0.9,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 76.5
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 8,
+    "type": "ground_model",
+    "icon": "TankDestroyer",
+    "cls": "tank_destroyer",
+    "first_seen": "18:31:37.763",
+    "last_seen": "18:31:58.784",
+    "lifetime_s": 21.02,
+    "spans": [
+     [
+      "18:31:37.763",
+      21.02
+     ]
+    ],
+    "n_obs": 210,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 21.02,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.444871,
+     0.558882
+    ],
+    "last_world": [
+     1822.2,
+     2289.2
+    ],
+    "distance_m": 93.0,
+    "bearing_deg": 79.7,
+    "blink_timeline": [
+     {
+      "t": "18:31:37.763",
+      "t_ms": 1791628297763,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 11.22,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": 9.2
+     },
+     {
+      "t": "18:31:48.984",
+      "t_ms": 1791628308984,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 9.8,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 7.9
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   }
+  ]
+ },
+ {
+  "session": "20261010-182921-shengyuan-b6a7",
+  "start": "18:32:08.889",
+  "end": "18:32:29.537",
+  "kind": "test_drive",
+  "kind_reasons": [
+   "max friendly units/frame=0",
+   "zones/respawn objs=none",
+   "live hud PvP lines=0",
+   "live hud kills of bare-named AI targets=0"
+  ],
+  "map_info": {
+   "map_min": [
+    -65536.0,
+    -65536.0
+   ],
+   "map_max": [
+    65536.0,
+    65536.0
+   ],
+   "gen": 27,
+   "hud_type": 0
+  },
+  "n_frames": 187,
+  "hud_live": [],
+  "speed_minus1_blips": [],
+  "variants": [
+   {
+    "type": "aircraft",
+    "icon": "Bomber",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": true,
+    "icon_bg": "none",
+    "obs": 1600,
+    "frames": 181,
+    "tracks": 9
+   },
+   {
+    "type": "ground_model",
+    "icon": "LightTank",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 1117,
+    "frames": 162,
+    "tracks": 8
+   },
+   {
+    "type": "ground_model",
+    "icon": "Wheeled",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 649,
+    "frames": 163,
+    "tracks": 4
+   },
+   {
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 644,
+    "frames": 162,
+    "tracks": 4
+   },
+   {
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 638,
+    "frames": 160,
+    "tracks": 4
+   },
+   {
+    "type": "ground_model",
+    "icon": "SPAA",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 476,
+    "frames": 160,
+    "tracks": 3
+   },
+   {
+    "type": "bombing_point",
+    "icon": "bombing_point",
+    "color": "#fa0C00",
+    "rgb": [
+     250,
+     12,
+     0
+    ],
+    "blink": 0,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 468,
+    "frames": 147,
+    "tracks": 0
+   },
+   {
+    "type": "aircraft",
+    "icon": "Fighter",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": true,
+    "icon_bg": "none",
+    "obs": 182,
+    "frames": 182,
+    "tracks": 1
+   },
+   {
+    "type": "aircraft",
+    "icon": "Player",
+    "color": "#faC81E",
+    "rgb": [
+     250,
+     200,
+     30
+    ],
+    "blink": 0,
+    "has_dxdy": true,
+    "icon_bg": "none",
+    "obs": 165,
+    "frames": 165,
+    "tracks": 0
+   },
+   {
+    "type": "ground_model",
+    "icon": "LightTank",
+    "color": "#f00C00",
+    "rgb": [
+     240,
+     12,
+     0
+    ],
+    "blink": 2,
+    "has_dxdy": false,
+    "icon_bg": "none",
+    "obs": 100,
+    "frames": 60,
+    "tracks": 2
+   },
+   {
+    "type": "aircraft",
+    "icon": "Player",
+    "color": "#043FFF",
+    "rgb": [
+     4,
+     63,
+     255
+    ],
+    "blink": 2,
+    "has_dxdy": true,
+    "icon_bg": "none",
+    "obs": 20,
+    "frames": 20,
+    "tracks": 0
+   }
+  ],
+  "threat_summary_sample": {
+   "t_ms": 1791628340139,
+   "n_visible": 33,
+   "n_stale": 0,
+   "sectors": [
+    0,
+    0,
+    0,
+    5,
+    0,
+    5,
+    20,
+    3
+   ],
+   "sectors_visible": [
+    0,
+    0,
+    0,
+    5,
+    0,
+    5,
+    20,
+    3
+   ],
+   "nearest_id": 33,
+   "nearest_distance_m": 2591.6544694806,
+   "nearest_bearing_deg": 245.99779155990547,
+   "nearest_sector": "SW",
+   "dominant_sector": "W",
+   "t": "18:32:20.139"
+  },
+  "contacts": [
+   {
+    "contact_id": 1,
+    "type": "aircraft",
+    "icon": "Fighter",
+    "cls": "air_fighter",
+    "first_seen": "18:32:11.036",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 18.1,
+    "spans": [
+     [
+      "18:32:11.036",
+      18.1
+     ]
+    ],
+    "n_obs": 182,
+    "n_pos_changes": 167,
+    "pos_change_ratio": 0.923,
+    "max_static_s": 1.39,
+    "speed_mps": 48.78,
+    "course_deg": 71.5,
+    "heading_deg": 71.6,
+    "last_norm": [
+     0.673819,
+     0.531947
+    ],
+    "last_world": [
+     22782.8,
+     4187.4
+    ],
+    "distance_m": 7492.2,
+    "bearing_deg": 219.2,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.036",
+      "t_ms": 1791628331036,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 18.1,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -33.0
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 2,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.144",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.99,
+    "spans": [
+     [
+      "18:32:11.144",
+      17.99
+     ]
+    ],
+    "n_obs": 181,
+    "n_pos_changes": 166,
+    "pos_change_ratio": 0.922,
+    "max_static_s": 1.39,
+    "speed_mps": 46.23,
+    "course_deg": 174.1,
+    "heading_deg": 181.2,
+    "last_norm": [
+     0.67405,
+     0.463785
+    ],
+    "last_world": [
+     22813.1,
+     -4746.8
+    ],
+    "distance_m": 5651.1,
+    "bearing_deg": 303.6,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.144",
+      "t_ms": 1791628331144,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.99,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 29.0
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 3,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.144",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.99,
+    "spans": [
+     [
+      "18:32:11.144",
+      17.99
+     ]
+    ],
+    "n_obs": 181,
+    "n_pos_changes": 166,
+    "pos_change_ratio": 0.922,
+    "max_static_s": 1.39,
+    "speed_mps": 45.84,
+    "course_deg": 170.8,
+    "heading_deg": 176.7,
+    "last_norm": [
+     0.67404,
+     0.46324
+    ],
+    "last_world": [
+     22811.8,
+     -4818.2
+    ],
+    "distance_m": 5692.0,
+    "bearing_deg": 304.2,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.144",
+      "t_ms": 1791628331144,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.99,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 28.6
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 4,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.144",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.99,
+    "spans": [
+     [
+      "18:32:11.144",
+      17.99
+     ]
+    ],
+    "n_obs": 181,
+    "n_pos_changes": 166,
+    "pos_change_ratio": 0.922,
+    "max_static_s": 1.39,
+    "speed_mps": 47.82,
+    "course_deg": 169.6,
+    "heading_deg": 175.5,
+    "last_norm": [
+     0.674359,
+     0.462941
+    ],
+    "last_world": [
+     22853.6,
+     -4857.4
+    ],
+    "distance_m": 5679.8,
+    "bearing_deg": 304.8,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.144",
+      "t_ms": 1791628331144,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.99,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 29.0
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 5,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.440",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.69,
+    "spans": [
+     [
+      "18:32:11.440",
+      17.69
+     ]
+    ],
+    "n_obs": 178,
+    "n_pos_changes": 163,
+    "pos_change_ratio": 0.921,
+    "max_static_s": 1.39,
+    "speed_mps": 47.8,
+    "course_deg": 161.0,
+    "heading_deg": 160.0,
+    "last_norm": [
+     0.634354,
+     0.493382
+    ],
+    "last_world": [
+     17610.0,
+     -867.4
+    ],
+    "distance_m": 9937.3,
+    "bearing_deg": 265.7,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.440",
+      "t_ms": 1791628331440,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.69,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 4.7
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 6,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.533",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.6,
+    "spans": [
+     [
+      "18:32:11.533",
+      17.6
+     ]
+    ],
+    "n_obs": 177,
+    "n_pos_changes": 162,
+    "pos_change_ratio": 0.92,
+    "max_static_s": 1.39,
+    "speed_mps": 52.85,
+    "course_deg": 160.9,
+    "heading_deg": 154.4,
+    "last_norm": [
+     0.633943,
+     0.494464
+    ],
+    "last_world": [
+     17556.2,
+     -725.6
+    ],
+    "distance_m": 10002.7,
+    "bearing_deg": 264.9,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.533",
+      "t_ms": 1791628331533,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.6,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 3.7
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 7,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.533",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.6,
+    "spans": [
+     [
+      "18:32:11.533",
+      17.6
+     ]
+    ],
+    "n_obs": 177,
+    "n_pos_changes": 162,
+    "pos_change_ratio": 0.92,
+    "max_static_s": 1.39,
+    "speed_mps": 53.31,
+    "course_deg": 164.9,
+    "heading_deg": 162.1,
+    "last_norm": [
+     0.63329,
+     0.493368
+    ],
+    "last_world": [
+     17470.6,
+     -869.3
+    ],
+    "distance_m": 10076.2,
+    "bearing_deg": 265.7,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.533",
+      "t_ms": 1791628331533,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.6,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 4.4
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 8,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.736",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.4,
+    "spans": [
+     [
+      "18:32:11.736",
+      17.4
+     ]
+    ],
+    "n_obs": 175,
+    "n_pos_changes": 160,
+    "pos_change_ratio": 0.92,
+    "max_static_s": 1.39,
+    "speed_mps": 52.8,
+    "course_deg": 124.5,
+    "heading_deg": 118.1,
+    "last_norm": [
+     0.752034,
+     0.532041
+    ],
+    "last_world": [
+     33034.6,
+     4199.7
+    ],
+    "distance_m": 8016.7,
+    "bearing_deg": 136.5,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.736",
+      "t_ms": 1791628331736,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.4,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -120.2
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 9,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.736",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.4,
+    "spans": [
+     [
+      "18:32:11.736",
+      17.4
+     ]
+    ],
+    "n_obs": 175,
+    "n_pos_changes": 160,
+    "pos_change_ratio": 0.92,
+    "max_static_s": 1.39,
+    "speed_mps": 53.26,
+    "course_deg": 128.5,
+    "heading_deg": 125.6,
+    "last_norm": [
+     0.750857,
+     0.531552
+    ],
+    "last_world": [
+     32880.3,
+     4135.6
+    ],
+    "distance_m": 7864.3,
+    "bearing_deg": 137.0,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.736",
+      "t_ms": 1791628331736,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.4,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -120.2
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 10,
+    "type": "aircraft",
+    "icon": "Bomber",
+    "cls": "air_bomber",
+    "first_seen": "18:32:11.736",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 17.4,
+    "spans": [
+     [
+      "18:32:11.736",
+      17.4
+     ]
+    ],
+    "n_obs": 175,
+    "n_pos_changes": 160,
+    "pos_change_ratio": 0.92,
+    "max_static_s": 1.39,
+    "speed_mps": 47.88,
+    "course_deg": 124.8,
+    "heading_deg": 123.7,
+    "last_norm": [
+     0.751721,
+     0.530943
+    ],
+    "last_world": [
+     32993.6,
+     4055.8
+    ],
+    "distance_m": 7884.3,
+    "bearing_deg": 136.0,
+    "blink_timeline": [
+     {
+      "t": "18:32:11.736",
+      "t_ms": 1791628331736,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 17.4,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -121.4
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "unknown",
+    "reveal_rule": "R0 aircraft: air contacts are shown by separate rules (always #f00C00/blink2 in test flight)",
+    "reveal_confidence": 0.3
+   },
+   {
+    "contact_id": 11,
+    "type": "ground_model",
+    "icon": "Wheeled",
+    "cls": "wheeled",
+    "first_seen": "18:32:12.934",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.2,
+    "spans": [
+     [
+      "18:32:12.934",
+      16.2
+     ]
+    ],
+    "n_obs": 163,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.2,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.654875,
+     0.485577
+    ],
+    "last_world": [
+     20299.8,
+     -1890.5
+    ],
+    "distance_m": 7224.3,
+    "bearing_deg": 272.2,
+    "blink_timeline": [
+     {
+      "t": "18:32:12.934",
+      "t_ms": 1791628332934,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.2,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 0.9
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 12,
+    "type": "ground_model",
+    "icon": "Wheeled",
+    "cls": "wheeled",
+    "first_seen": "18:32:13.042",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.09,
+    "spans": [
+     [
+      "18:32:13.042",
+      16.09
+     ]
+    ],
+    "n_obs": 162,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.09,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.654875,
+     0.485196
+    ],
+    "last_world": [
+     20299.8,
+     -1940.4
+    ],
+    "distance_m": 7226.4,
+    "bearing_deg": 272.6,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.042",
+      "t_ms": 1791628333042,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.09,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 1.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 13,
+    "type": "ground_model",
+    "icon": "Wheeled",
+    "cls": "wheeled",
+    "first_seen": "18:32:13.042",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.09,
+    "spans": [
+     [
+      "18:32:13.042",
+      16.09
+     ]
+    ],
+    "n_obs": 162,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.09,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.655257,
+     0.485577
+    ],
+    "last_world": [
+     20349.8,
+     -1890.5
+    ],
+    "distance_m": 7174.3,
+    "bearing_deg": 272.2,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.042",
+      "t_ms": 1791628333042,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.09,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 0.9
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 14,
+    "type": "ground_model",
+    "icon": "Wheeled",
+    "cls": "wheeled",
+    "first_seen": "18:32:13.042",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.09,
+    "spans": [
+     [
+      "18:32:13.042",
+      16.09
+     ]
+    ],
+    "n_obs": 162,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.09,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.655257,
+     0.485196
+    ],
+    "last_world": [
+     20349.8,
+     -1940.4
+    ],
+    "distance_m": 7176.4,
+    "bearing_deg": 272.6,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.042",
+      "t_ms": 1791628333042,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.09,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 1.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 15,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:32:13.042",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.09,
+    "spans": [
+     [
+      "18:32:13.042",
+      16.09
+     ]
+    ],
+    "n_obs": 162,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.09,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.654875,
+     0.484051
+    ],
+    "last_world": [
+     20299.8,
+     -2090.5
+    ],
+    "distance_m": 7234.6,
+    "bearing_deg": 273.7,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.042",
+      "t_ms": 1791628333042,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.09,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 2.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 16,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:32:13.042",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.09,
+    "spans": [
+     [
+      "18:32:13.042",
+      16.09
+     ]
+    ],
+    "n_obs": 162,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.09,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.654875,
+     0.48367
+    ],
+    "last_world": [
+     20299.8,
+     -2140.4
+    ],
+    "distance_m": 7238.1,
+    "bearing_deg": 274.1,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.042",
+      "t_ms": 1791628333042,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.09,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 2.6
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 17,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:13.042",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.09,
+    "spans": [
+     [
+      "18:32:13.042",
+      16.09
+     ]
+    ],
+    "n_obs": 162,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.09,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.655257,
+     0.484051
+    ],
+    "last_world": [
+     20349.8,
+     -2090.5
+    ],
+    "distance_m": 7184.7,
+    "bearing_deg": 273.8,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.042",
+      "t_ms": 1791628333042,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.09,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 2.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 18,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:13.135",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.0,
+    "spans": [
+     [
+      "18:32:13.135",
+      16.0
+     ]
+    ],
+    "n_obs": 161,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.0,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.655257,
+     0.48367
+    ],
+    "last_world": [
+     20349.8,
+     -2140.4
+    ],
+    "distance_m": 7188.1,
+    "bearing_deg": 274.2,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.135",
+      "t_ms": 1791628333135,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.0,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 2.7
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 19,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:13.135",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.0,
+    "spans": [
+     [
+      "18:32:13.135",
+      16.0
+     ]
+    ],
+    "n_obs": 161,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.0,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.654875,
+     0.482525
+    ],
+    "last_world": [
+     20299.8,
+     -2290.5
+    ],
+    "distance_m": 7250.4,
+    "bearing_deg": 275.3,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.135",
+      "t_ms": 1791628333135,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.0,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 3.6
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 20,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:13.135",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 16.0,
+    "spans": [
+     [
+      "18:32:13.135",
+      16.0
+     ]
+    ],
+    "n_obs": 161,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 16.0,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.654875,
+     0.482144
+    ],
+    "last_world": [
+     20299.8,
+     -2340.4
+    ],
+    "distance_m": 7255.2,
+    "bearing_deg": 275.7,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.135",
+      "t_ms": 1791628333135,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 16.0,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 4.0
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 21,
+    "type": "ground_model",
+    "icon": "SPAA",
+    "cls": "spaa",
+    "first_seen": "18:32:13.243",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.89,
+    "spans": [
+     [
+      "18:32:13.243",
+      15.89
+     ]
+    ],
+    "n_obs": 160,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.89,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.655257,
+     0.482525
+    ],
+    "last_world": [
+     20349.8,
+     -2290.5
+    ],
+    "distance_m": 7200.6,
+    "bearing_deg": 275.4,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.243",
+      "t_ms": 1791628333243,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 3.7
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 22,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:32:13.243",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.89,
+    "spans": [
+     [
+      "18:32:13.243",
+      15.89
+     ]
+    ],
+    "n_obs": 160,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.89,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.653106,
+     0.485577
+    ],
+    "last_world": [
+     20067.9,
+     -1890.5
+    ],
+    "distance_m": 7456.0,
+    "bearing_deg": 272.1,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.243",
+      "t_ms": 1791628333243,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 1.1
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 23,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:32:13.243",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.89,
+    "spans": [
+     [
+      "18:32:13.243",
+      15.89
+     ]
+    ],
+    "n_obs": 160,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.89,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.653106,
+     0.485196
+    ],
+    "last_world": [
+     20067.9,
+     -1940.4
+    ],
+    "distance_m": 7458.0,
+    "bearing_deg": 272.5,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.243",
+      "t_ms": 1791628333243,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 1.4
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 24,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:32:13.243",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.89,
+    "spans": [
+     [
+      "18:32:13.243",
+      15.89
+     ]
+    ],
+    "n_obs": 160,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.89,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.653487,
+     0.485577
+    ],
+    "last_world": [
+     20117.8,
+     -1890.5
+    ],
+    "distance_m": 7406.1,
+    "bearing_deg": 272.1,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.243",
+      "t_ms": 1791628333243,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 1.1
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 25,
+    "type": "ground_model",
+    "icon": "MediumTank",
+    "cls": "tank_medium",
+    "first_seen": "18:32:13.243",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.89,
+    "spans": [
+     [
+      "18:32:13.243",
+      15.89
+     ]
+    ],
+    "n_obs": 160,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.89,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.653487,
+     0.485196
+    ],
+    "last_world": [
+     20117.8,
+     -1940.4
+    ],
+    "distance_m": 7408.1,
+    "bearing_deg": 272.5,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.243",
+      "t_ms": 1791628333243,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.89,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 1.4
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 26,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:32:13.337",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.8,
+    "spans": [
+     [
+      "18:32:13.337",
+      15.8
+     ]
+    ],
+    "n_obs": 159,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.8,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.653106,
+     0.484051
+    ],
+    "last_world": [
+     20067.9,
+     -2090.5
+    ],
+    "distance_m": 7466.0,
+    "bearing_deg": 273.6,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.337",
+      "t_ms": 1791628333337,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.8,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 2.4
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 27,
+    "type": "ground_model",
+    "icon": "HeavyTank",
+    "cls": "tank_heavy",
+    "first_seen": "18:32:13.337",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.8,
+    "spans": [
+     [
+      "18:32:13.337",
+      15.8
+     ]
+    ],
+    "n_obs": 159,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.8,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.653106,
+     0.48367
+    ],
+    "last_world": [
+     20067.9,
+     -2140.4
+    ],
+    "distance_m": 7469.3,
+    "bearing_deg": 274.0,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.337",
+      "t_ms": 1791628333337,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.8,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": 2.7
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 28,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:13.443",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.69,
+    "spans": [
+     [
+      "18:32:13.443",
+      15.69
+     ]
+    ],
+    "n_obs": 158,
+    "n_pos_changes": 120,
+    "pos_change_ratio": 0.764,
+    "max_static_s": 2.0,
+    "speed_mps": 3.7,
+    "course_deg": 216.3,
+    "heading_deg": null,
+    "last_norm": [
+     0.669898,
+     0.515089
+    ],
+    "last_world": [
+     22268.9,
+     1977.7
+    ],
+    "distance_m": 6363.4,
+    "bearing_deg": 235.6,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.443",
+      "t_ms": 1791628333443,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.69,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -28.4
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 29,
+    "type": "ground_model",
+    "icon": "SPAA",
+    "cls": "spaa",
+    "first_seen": "18:32:13.443",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.69,
+    "spans": [
+     [
+      "18:32:13.443",
+      15.69
+     ]
+    ],
+    "n_obs": 158,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.69,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.893896,
+     0.608437
+    ],
+    "last_world": [
+     51628.7,
+     14213.1
+    ],
+    "distance_m": 28842.7,
+    "bearing_deg": 123.3,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.443",
+      "t_ms": 1791628333443,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.69,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -142.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 30,
+    "type": "ground_model",
+    "icon": "SPAA",
+    "cls": "spaa",
+    "first_seen": "18:32:13.443",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 15.69,
+    "spans": [
+     [
+      "18:32:13.443",
+      15.69
+     ]
+    ],
+    "n_obs": 158,
+    "n_pos_changes": 0,
+    "pos_change_ratio": 0.0,
+    "max_static_s": 15.69,
+    "speed_mps": 0.0,
+    "course_deg": null,
+    "heading_deg": null,
+    "last_norm": [
+     0.88132,
+     0.611667
+    ],
+    "last_world": [
+     49980.4,
+     14636.4
+    ],
+    "distance_m": 27725.8,
+    "bearing_deg": 125.9,
+    "blink_timeline": [
+     {
+      "t": "18:32:13.443",
+      "t_ms": 1791628333443,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 15.69,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -139.5
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 31,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:14.434",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 14.7,
+    "spans": [
+     [
+      "18:32:14.434",
+      14.7
+     ]
+    ],
+    "n_obs": 148,
+    "n_pos_changes": 118,
+    "pos_change_ratio": 0.803,
+    "max_static_s": 1.39,
+    "speed_mps": 3.53,
+    "course_deg": 235.1,
+    "heading_deg": null,
+    "last_norm": [
+     0.667361,
+     0.517238
+    ],
+    "last_world": [
+     21936.3,
+     2259.4
+    ],
+    "distance_m": 6797.0,
+    "bearing_deg": 235.2,
+    "blink_timeline": [
+     {
+      "t": "18:32:14.434",
+      "t_ms": 1791628334434,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 14.7,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -29.8
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1 test drive: AI targets always shown, #fa0C00 blink0",
+    "reveal_confidence": 0.9
+   },
+   {
+    "contact_id": 32,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:15.442",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 13.69,
+    "spans": [
+     [
+      "18:32:15.442",
+      13.69
+     ]
+    ],
+    "n_obs": 138,
+    "n_pos_changes": 70,
+    "pos_change_ratio": 0.511,
+    "max_static_s": 5.1,
+    "speed_mps": 1.82,
+    "course_deg": 324.8,
+    "heading_deg": null,
+    "last_norm": [
+     0.69674,
+     0.49259
+    ],
+    "last_world": [
+     25787.1,
+     -971.2
+    ],
+    "distance_m": 1848.7,
+    "bearing_deg": 249.5,
+    "blink_timeline": [
+     {
+      "t": "18:32:15.442",
+      "t_ms": 1791628335442,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 0.09,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": -18.1
+     },
+     {
+      "t": "18:32:15.534",
+      "t_ms": 1791628335534,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 5.01,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": -18.4
+     },
+     {
+      "t": "18:32:20.542",
+      "t_ms": 1791628340542,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 8.59,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -22.3
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   },
+   {
+    "contact_id": 33,
+    "type": "ground_model",
+    "icon": "LightTank",
+    "cls": "tank_light",
+    "first_seen": "18:32:16.435",
+    "last_seen": "18:32:29.134",
+    "lifetime_s": 12.7,
+    "spans": [
+     [
+      "18:32:16.435",
+      12.7
+     ]
+    ],
+    "n_obs": 128,
+    "n_pos_changes": 57,
+    "pos_change_ratio": 0.449,
+    "max_static_s": 5.3,
+    "speed_mps": 2.95,
+    "course_deg": 310.8,
+    "heading_deg": null,
+    "last_norm": [
+     0.696945,
+     0.492779
+    ],
+    "last_world": [
+     25814.0,
+     -946.5
+    ],
+    "distance_m": 1832.4,
+    "bearing_deg": 248.5,
+    "blink_timeline": [
+     {
+      "t": "18:32:16.435",
+      "t_ms": 1791628336435,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 0.11,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": -20.3
+     },
+     {
+      "t": "18:32:16.543",
+      "t_ms": 1791628336543,
+      "blink": 2,
+      "color": "#f00C00",
+      "dur_s": 4.99,
+      "open_until_end": false,
+      "rel_bearing_to_hull_deg": -20.2
+     },
+     {
+      "t": "18:32:21.537",
+      "t_ms": 1791628341537,
+      "blink": 0,
+      "color": "#fa0C00",
+      "dur_s": 7.6,
+      "open_until_end": true,
+      "rel_bearing_to_hull_deg": -24.2
+     }
+    ],
+    "disappeared_before_segment_end": false,
+    "kill_hud_near_disappearance": [],
+    "reveal_kind": "visible_static",
+    "reveal_rule": "R1b test drive: always shown; blink2/#f00C00 phases = highlight (cause unproven)",
+    "reveal_confidence": 0.7
+   }
+  ]
+ }
+]

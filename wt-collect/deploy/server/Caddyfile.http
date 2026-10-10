@@ -1,0 +1,30 @@
+# wt-tactical-hk: plain HTTP on the public IP (token-protected receiver). HTTPS site added by deploy/wt-dns-setup.py
+{
+	admin localhost:2019
+}
+
+(wt_proxy) {
+	request_body {
+		max_size 32MB
+	}
+	encode {
+		gzip
+		match {
+			header Content-Type text/html*
+			header Content-Type application/json*
+		}
+	}
+	reverse_proxy 127.0.0.1:18111 {
+		flush_interval -1
+	}
+	log {
+		output file /var/log/caddy/wt-access.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}
+
+http://43.129.251.18 {
+	import wt_proxy
+}
