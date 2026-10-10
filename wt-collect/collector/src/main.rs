@@ -8,6 +8,8 @@ mod upload;
 pub mod gate;
 pub mod labels;
 #[cfg(feature = "gui")]
+mod desktop;
+#[cfg(feature = "gui")]
 mod gui;
 
 use anyhow::{Context, Result};
@@ -113,7 +115,11 @@ enum Cmd {
         session: Option<String>,
     },
     /// Open the window with labeling buttons (default when the exe is started without arguments on Windows)
-    Gui,
+    Gui {
+        /// start hidden in the system tray (used by the "开机自动启动" entry)
+        #[arg(long)]
+        tray: bool,
+    },
     /// Send one label event right now (testing; source "cli"), e.g. `wt-collector label kill --note test`
     Label {
         /// label id from the config (e.g. i_scouted, kill, note)
@@ -144,13 +150,15 @@ struct FileCfg {
     gui: Option<GuiCfg>,
 }
 
+pub const DEFAULT_MAP_URL: &str = "https://wt.zuens2020.top/proto/";
+
 /// `[gui]` section of wt-collector.toml
 #[derive(Deserialize, Debug, Clone)]
 #[serde(default)]
 pub struct GuiCfg {
     /// window stays above other windows (toggle in the window)
     pub always_on_top: bool,
-    /// close button: "ask" (default) | "minimize" | "exit"
+    /// close button: "ask" (default) | "tray" (hide to the system tray) | "minimize" | "exit"
     pub on_close: String,
     /// font file with Chinese glyphs (default: Microsoft YaHei / SimHei / SimSun from C:\Windows\Fonts)
     pub font: Option<String>,
@@ -158,10 +166,12 @@ pub struct GuiCfg {
     pub scale: f32,
     /// buttons per row
     pub columns: usize,
+    /// web tactical map opened by the "打开战术地图" button (http/https only)
+    pub map_url: String,
 }
 impl Default for GuiCfg {
     fn default() -> Self {
-        GuiCfg { always_on_top: true, on_close: "ask".into(), font: None, scale: 1.0, columns: 2 }
+        GuiCfg { always_on_top: true, on_close: "ask".into(), font: None, scale: 1.0, columns: 2, map_url: DEFAULT_MAP_URL.into() }
     }
 }
 #[derive(Deserialize, Default, Debug)]
@@ -1273,12 +1283,12 @@ fn main() {
     let interactive_default = std::env::args().len() <= 1;
     let cli = Cli::parse();
     // GUI: explicit `gui`, or no arguments at all on Windows (double-click)
-    let want_gui = matches!(cli.cmd, Some(Cmd::Gui)) || (interactive_default && cfg!(windows) && cfg!(feature = "gui"));
+    let want_gui = matches!(cli.cmd, Some(Cmd::Gui { .. })) || (interactive_default && cfg!(windows) && cfg!(feature = "gui"));
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().expect("tokio runtime");
     #[cfg(feature = "gui")]
     if want_gui {
         let code = match load_cfg(&cli) {
-            Ok(cfg) => gui::run_gui(cfg, &rt),
+            Ok(cfg) => gui::run_gui(cfg, &rt, matches!(cli.cmd, Some(Cmd::Gui { tray: true }))),
             Err(e) => {
                 gui::fatal(&format!("{e:#}"));
                 1
@@ -1288,7 +1298,7 @@ fn main() {
         std::process::exit(code);
     }
     #[cfg(not(feature = "gui"))]
-    if want_gui && matches!(cli.cmd, Some(Cmd::Gui)) {
+    if want_gui && matches!(cli.cmd, Some(Cmd::Gui { .. })) {
         eprintln!("this build has no GUI (built without the `gui` feature)");
         std::process::exit(2);
     }
@@ -1634,5 +1644,20 @@ async fn wait_shutdown(duration_s: Option<f64>, ui_stop: Option<watch::Receiver<
             _ = term_f => {}
             _ = dur => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod gui_cfg_tests {
+    use super::*;
+    #[test]
+    fn package_toml_gui_section_parses_with_map_url() {
+        let fc: FileCfg = toml::from_str(include_str!("../../dist/pkg/wt-collector.tmpl.toml")).unwrap();
+        let g = fc.gui.unwrap();
+        assert_eq!(g.map_url, DEFAULT_MAP_URL);
+        assert_eq!(g.on_close, "ask");
+        // missing map_url -> default
+        let g2: GuiCfg = toml::from_str("columns = 3").unwrap();
+        assert_eq!(g2.map_url, DEFAULT_MAP_URL);
     }
 }

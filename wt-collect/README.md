@@ -56,13 +56,24 @@ All ship/naval info is removed in the receiver ingest path before writing (recei
   Counters per session in guard.json, /api/status `clock_guard`, status page, analyzer report. Stored records get recv_ms.
 - Test: test/clock-test.sh <label> <faketime skew> <linux|wine> (outage + 3.6 s link delay via mock/delayproxy.py --delay-file).
 
-## 0.2.2: uniform pings
+## 0.2.2: uniform pings + finished desktop client
 
 - Pings are not distinguished by owner. Collector default buttons = original 9 + one `ping` (标点), replacing the 4 buttons of 0.2.1.
 - Receiver `ev:"ping"` has one uniform shape: `id, t, t_end (= t + ttl_ms), ttl_ms (30 s display policy), grid, area, x, y,
   precision (grid | none), kind, text, source` + optional `meta {sender, own, sender_role, sender_track, sender_xy, sender_cell, ...}`
   that nothing branches on. `/api/status.allies.recent_pings` lists active pings without any owner fields; location calls and
   point_of_interest markers moved to `recent_calls`. Package `dist/wt-collector-win64.zip` (0.2.2), previous `dist/wt-collector-win64-0.2.1.zip`.
+- Desktop client (`collector/src/desktop.rs`, `gui.rs`): app icon embedded in the exe (`collector/build.rs` + `wt-collector.rc`
+  via embed-resource/mingw windres, `assets/wt-collector.ico`, also the window icon); title "WT 战术指挥 · 数据采集 v0.2.2";
+  system tray (tray-icon 0.26: left click toggles, menu 显示窗口 / 隐藏/显示 / 打开战术地图 / 退出采集; `[gui] on_close = "tray"`,
+  ask-dialog offers 隐藏到托盘); window placement saved as physical `rect_px` from GetWindowPlacement (valid while
+  minimized/hidden, restored with SetWindowPlacement only if the title bar is on a connected monitor; fixes -32000 minimized
+  positions and DPI/multi-monitor drift); "打开战术地图" button -> `[gui] map_url` (http/https only, ShellExecuteW);
+  Chinese status summary line + tray tooltip; optional autostart checkbox (HKCU\Software\Microsoft\Windows\CurrentVersion\Run,
+  value `WT-Collector` = `"<exe>" gui --tray`); `gui --tray` starts hidden in the tray; single instance (named mutex
+  `Local\wt-collector-gui`, a second start shows the running window and exits). Keyboard: no hooks/hotkeys, label buttons fire
+  on primary mouse clicks only. Wine smoke-tested (window, icon, restore, hide, tray start, single instance, autostart key,
+  map button); tray clicks cannot be tested under Wine (Shell_NotifyIconGetRect unimplemented -> tray-icon drops events). Package `dist/wt-collector-win64.zip` (0.2.2), previous `dist/wt-collector-win64-0.2.1.zip`.
 
 ## 0.2.1: squadmates + map pings (标点)
 

@@ -1,6 +1,11 @@
-//! Native window (egui/eframe, OpenGL) with data-labeling buttons. 0.2.0 (0.2.2: one 标点 ping button).
+//! Native window (egui/eframe, OpenGL) with data-labeling buttons. 0.2.0; 0.2.2: one 标点 ping button,
+//! embedded app icon, system tray (show/hide/exit, close-to-tray), native window placement restore,
+//! "打开战术地图" button ([gui] map_url), status summary line, optional autostart (HKCU Run).
+//! Keyboard: no hooks / hotkeys; label buttons react to mouse clicks only (a focused button never fires on
+//! Space/Enter, so keys meant for the game can't create labels), and the window never grabs focus by itself.
 //! Collection runs on the tokio runtime in the background; the window only reads shared state and
 //! queues label events (Shared::add_label). All UI text is Simplified Chinese.
+use crate::desktop::{self, Hwnd, Tray, TrayCmd};
 use crate::labels::{self, LabelDef};
 use crate::{gate, Cfg, Shared, UiLink, VERSION};
 use eframe::egui::{self, Color32, RichText};
@@ -18,6 +23,9 @@ struct WinState {
     w: Option<f32>,
     h: Option<f32>,
     always_on_top: Option<bool>,
+    /// 0.2.2: restored window rect in physical (workspace) pixels from GetWindowPlacement
+    #[serde(default)]
+    rect_px: Option<[i32; 4]>,
 }
 
 fn state_path() -> Option<std::path::PathBuf> {
@@ -120,9 +128,14 @@ pub fn fatal(msg: &str) {
 
 // ---------------------------------------------------------------- app
 
-pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime) -> i32 {
+pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime, start_in_tray: bool) -> i32 {
     crate::QUIET.store(true, Ordering::Relaxed);
     detach_console();
+    let title = format!("WT 战术指挥 · 数据采集 v{VERSION}");
+    if desktop::activate_existing(&title) {
+        // already running (maybe hidden in the tray): its window was brought to the front
+        return 0;
+    }
     let (stop_tx, stop_rx) = watch::channel(false);
     let (shared_tx, shared_rx) = std::sync::mpsc::channel();
     let link = UiLink { shared_tx, stop: stop_rx };
@@ -131,10 +144,13 @@ pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime) -> i32 {
     let st = load_state();
     let on_top = st.always_on_top.unwrap_or(cfg.gui.always_on_top);
     let mut vp = egui::ViewportBuilder::default()
-        .with_title(format!("WT 数据采集 {VERSION} · 标注"))
+        .with_title(title)
+        .with_app_id("wt-collector")
+        .with_icon(egui::IconData { rgba: desktop::ICON64.to_vec(), width: 64, height: 64 })
         .with_inner_size([st.w.unwrap_or(400.0).clamp(300.0, 1200.0), st.h.unwrap_or(600.0).clamp(300.0, 1400.0)])
         .with_min_inner_size([300.0, 300.0]);
-    if let (Some(x), Some(y)) = (st.x, st.y) {
+    // logical position only as a fallback for old gui.json files without rect_px (non-Windows / first run)
+    if let (Some(x), Some(y), None) = (st.x, st.y, st.rect_px) {
         // ignore positions far off-screen (monitor removed)
         if x > -200.0 && y > -50.0 && x < 6000.0 && y < 4000.0 {
             vp = vp.with_position([x, y]);
@@ -142,6 +158,9 @@ pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime) -> i32 {
     }
     if on_top {
         vp = vp.with_window_level(egui::WindowLevel::AlwaysOnTop);
+    }
+    if start_in_tray && cfg!(windows) {
+        vp = vp.with_visible(false).with_active(false);
     }
     let opts = eframe::NativeOptions { viewport: vp, renderer: eframe::Renderer::Glow, ..Default::default() };
     let app_cfg = cfg.clone();
@@ -156,7 +175,40 @@ pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime) -> i32 {
             if font.is_none() {
                 crate::say!("[界面] 未找到中文字体（可在 [gui] font = \"C:\\\\Windows\\\\Fonts\\\\msyh.ttc\" 指定）");
             }
-            Ok(Box::new(App::new(app_cfg, shared_rx, collector2, st, on_top, font)))
+            let hwnd = Hwnd::from_handle(cc);
+            if let Some(r) = st.rect_px {
+                hwnd.restore_placement(r);
+            }
+            let ctx = cc.egui_ctx.clone();
+            let cmds: Arc<std::sync::Mutex<Vec<TrayCmd>>> = Default::default();
+            let cmds2 = cmds.clone();
+            let tray = match Tray::new(move |c| {
+                // runs inside the window's message loop; the window may be hidden, so show it natively first
+                if matches!(c, TrayCmd::Show | TrayCmd::Exit) {
+                    hwnd.show();
+                } else if c == TrayCmd::Toggle {
+                    if hwnd.is_visible() && !hwnd.is_minimized() {
+                        hwnd.hide();
+                    } else {
+                        hwnd.show();
+                    }
+                }
+                cmds2.lock().unwrap().push(c);
+                ctx.request_repaint();
+            }) {
+                Ok(t) => Some(t),
+                Err(e) => {
+                    crate::say!("[界面] 系统托盘不可用：{e}");
+                    if start_in_tray {
+                        hwnd.show();
+                    }
+                    None
+                }
+            };
+            let has_tray = tray.is_some();
+            let mut app = App::new(app_cfg, shared_rx, collector2, st, on_top, font, hwnd, tray, cmds);
+            app.start_hidden = start_in_tray && has_tray;
+            Ok(Box::new(app))
         }),
     );
     let _ = stop_tx.send(true);
@@ -200,6 +252,14 @@ struct App {
     font: Option<String>,
     show_log: bool,
     exiting: Option<Instant>,
+    hwnd: Hwnd,
+    tray: Option<Tray>,
+    tray_cmds: Arc<std::sync::Mutex<Vec<TrayCmd>>>,
+    autostart: Option<bool>,
+    hint_tray_once: bool,
+    /// started with `gui --tray`: hide again right after eframe's first frame (eframe shows the window then)
+    start_hidden: bool,
+    frames: u64,
 }
 
 impl App {
@@ -210,6 +270,9 @@ impl App {
         win: WinState,
         on_top: bool,
         font: Option<String>,
+        hwnd: Hwnd,
+        tray: Option<Tray>,
+        tray_cmds: Arc<std::sync::Mutex<Vec<TrayCmd>>>,
     ) -> Self {
         App {
             cfg,
@@ -230,6 +293,13 @@ impl App {
             font,
             show_log: false,
             exiting: None,
+            hwnd,
+            tray,
+            tray_cmds,
+            autostart: desktop::autostart_get(),
+            hint_tray_once: false,
+            start_hidden: false,
+            frames: 0,
         }
     }
 
@@ -247,6 +317,72 @@ impl App {
             color: Color32::from_rgb(46, 160, 67),
         });
         self.last_click = Some((def.id.clone(), Instant::now()));
+    }
+
+    fn open_map(&mut self) {
+        let url = self.cfg.gui.map_url.clone();
+        match desktop::open_url(&url) {
+            Ok(()) => self.flash = Some(Flash { text: "已在浏览器中打开战术地图".into(), at: Instant::now(), color: Color32::from_rgb(70, 110, 160) }),
+            Err(e) => self.flash = Some(Flash { text: e, at: Instant::now(), color: Color32::from_rgb(180, 70, 60) }),
+        }
+    }
+
+    /// Hide to the tray (falls back to minimize when there is no tray).
+    fn to_tray(&mut self, ctx: &egui::Context) {
+        crate::say!("[界面] 隐藏到托盘（tray={} hwnd={}）", self.tray.is_some(), self.hwnd.ok());
+        if self.tray.is_some() && self.hwnd.ok() {
+            self.save_now();
+            // winit path (keeps winit's visibility state in sync); the tray shows the window natively
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            if !self.hint_tray_once {
+                self.hint_tray_once = true;
+                crate::say!("[界面] 已隐藏到系统托盘，采集继续；单击托盘图标可重新显示");
+            }
+        } else {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+        }
+    }
+
+    fn save_now(&mut self) {
+        if let Some(r) = self.hwnd.placement() {
+            self.win.rect_px = Some(r);
+        }
+        save_state(&self.win);
+        self.win_saved = self.win.clone();
+        self.last_save = Instant::now();
+    }
+
+    /// One-line overall state in plain Chinese (also used as the tray tooltip).
+    fn summary_of(sh: &Shared) -> (String, Color32) {
+        let ok = Color32::from_rgb(90, 200, 110);
+        let warn = Color32::from_rgb(240, 180, 60);
+        let bad = Color32::from_rgb(235, 90, 80);
+        let g = sh.game.lock().unwrap().clone();
+        let paused = *sh.paused.lock().unwrap();
+        let (fail, has_ok) = {
+            let u = sh.up.lock().unwrap();
+            (u.offline || !u.last_err.is_empty(), u.last_ok.is_some())
+        };
+        if !sh.reachable() {
+            return ("等待游戏：未检测到 War Thunder 本机接口（请启动游戏）".into(), warn);
+        }
+        if let Some((gate::Reason::GameDown, _)) = paused {
+            return ("等待游戏：游戏接口无响应，已暂停上传".into(), warn);
+        }
+        if let Some((gate::Reason::Hangar, _)) = paused {
+            return ("待命：在机库中，进入对局后自动开始上传".into(), warn);
+        }
+        if fail {
+            return ("上传失败：请检查网络（数据只在内存中暂存约 10 秒）".into(), bad);
+        }
+        let in_battle = g.map_valid == Some(true) || g.player.is_some();
+        if in_battle && has_ok {
+            return ("正在采集并上传本局数据".into(), ok);
+        }
+        if in_battle {
+            return ("对局中：正在连接服务器…".into(), warn);
+        }
+        ("已连接游戏，等待进入对局".into(), warn)
     }
 
     fn status_ui(&self, ui: &mut egui::Ui, sh: &Shared) {
@@ -361,15 +497,46 @@ impl eframe::App for App {
             }
         }
 
-        // --- window position / size memory
-        let (outer, inner, close_req) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
-        if let Some(r) = outer {
-            self.win.x = Some(r.min.x);
-            self.win.y = Some(r.min.y);
+        self.frames += 1;
+        if self.start_hidden && self.frames >= 2 {
+            self.start_hidden = false;
+            self.hint_tray_once = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
         }
-        if let Some(r) = inner {
-            self.win.w = Some(r.width());
-            self.win.h = Some(r.height());
+
+        // --- tray commands (queued by the tray callback; the window was already shown natively)
+        let cmds: Vec<TrayCmd> = std::mem::take(&mut *self.tray_cmds.lock().unwrap());
+        for c in cmds {
+            match c {
+                TrayCmd::OpenMap => self.open_map(),
+                TrayCmd::Exit => self.really_close = true,
+                TrayCmd::Show | TrayCmd::Toggle => {}
+            }
+        }
+        if let (Some(t), Some(sh)) = (self.tray.as_mut(), self.sh.as_ref()) {
+            let (txt, _) = App::summary_of(sh);
+            t.set_tooltip(&format!("WT 数据采集 · {txt}"));
+        }
+
+        // --- window position / size memory (skip while minimized / hidden: Windows reports -32000,-32000 then)
+        let (outer, inner, close_req, minimized) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested(), i.viewport().minimized.unwrap_or(false)));
+        let normal = !minimized && !self.hwnd.is_minimized() && self.hwnd.is_visible();
+        if normal {
+            if let Some(r) = outer {
+                if r.min.x > -10000.0 && r.min.y > -10000.0 {
+                    self.win.x = Some(r.min.x);
+                    self.win.y = Some(r.min.y);
+                }
+            }
+            if let Some(r) = inner {
+                if r.width() >= 200.0 && r.height() >= 200.0 {
+                    self.win.w = Some(r.width());
+                    self.win.h = Some(r.height());
+                }
+            }
+            if let Some(r) = self.hwnd.placement() {
+                self.win.rect_px = Some(r);
+            }
         }
         self.win.always_on_top = Some(self.on_top);
         if self.win != self.win_saved && self.last_save.elapsed() > Duration::from_secs(2) {
@@ -382,6 +549,10 @@ impl eframe::App for App {
         if close_req && !self.really_close {
             match self.cfg.gui.on_close.as_str() {
                 "exit" => self.really_close = true,
+                "tray" => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    self.to_tray(&ctx);
+                }
                 "minimize" => {
                     ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                     ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
@@ -393,7 +564,9 @@ impl eframe::App for App {
             }
         }
         if self.really_close {
-            save_state(&self.win);
+            if self.exiting.is_none() {
+                self.save_now();
+            }
             let pend = self.sh.as_ref().map(|s| s.labels.lock().unwrap().pending()).unwrap_or(0);
             let t = *self.exiting.get_or_insert_with(Instant::now);
             // wait (max 3 s) for pending labels before closing
@@ -406,7 +579,7 @@ impl eframe::App for App {
 
         egui::CentralPanel::default_margins().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("WT 数据采集 · 标注").strong());
+                ui.heading(RichText::new("WT 战术指挥 · 数据采集").strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.weak(format!("v{VERSION}"));
                 });
@@ -415,6 +588,20 @@ impl eframe::App for App {
                 ui.colored_label(Color32::from_rgb(235, 90, 80), e);
             }
             let sh = self.sh.clone();
+            if let Some(sh) = &sh {
+                let (txt, col) = App::summary_of(sh);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("●").color(col).size(16.0));
+                    ui.add(egui::Label::new(RichText::new(txt).color(col).strong()).wrap());
+                });
+            }
+            let map_btn = egui::Button::new(RichText::new("打开战术地图").size(15.0).strong().color(Color32::WHITE))
+                .fill(Color32::from_rgb(30, 90, 160))
+                .min_size(egui::vec2(ui.available_width(), 32.0));
+            let r = ui.add(map_btn).on_hover_text(format!("在默认浏览器中打开 {}", self.cfg.gui.map_url));
+            if r.clicked_by(egui::PointerButton::Primary) {
+                self.open_map();
+            }
             match &sh {
                 Some(sh) => self.status_ui(ui, sh),
                 None => {
@@ -469,7 +656,8 @@ impl eframe::App for App {
                     let fill = if hot { Color32::from_rgb(250, 250, 250) } else { base };
                     let tc = if hot { Color32::BLACK } else { Color32::WHITE };
                     let b = egui::Button::new(RichText::new(&d.text).size(16.0).color(tc).strong()).fill(fill).min_size(egui::vec2(bw, 44.0));
-                    if ui.add_enabled(enabled, b).clicked() {
+                    // mouse only: a focused egui button would also fire on Space/Enter (keys meant for the game)
+                    if ui.add_enabled(enabled, b).clicked_by(egui::PointerButton::Primary) {
                         clicked = Some(d.clone());
                     }
                     if (i + 1) % cols == 0 {
@@ -518,14 +706,34 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(if self.on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal }));
                 }
                 ui.checkbox(&mut self.show_log, "日志");
+                if let Some(mut on) = self.autostart {
+                    if ui.checkbox(&mut on, "开机自动启动").on_hover_text("登录 Windows 时自动在后台（托盘）启动采集。写入 HKCU\\…\\Run，可随时取消").changed() {
+                        match desktop::autostart_set(on) {
+                            Ok(()) => {
+                                self.autostart = desktop::autostart_get();
+                                let t = if on { "已设置开机自动启动（启动后在托盘中）" } else { "已取消开机自动启动" };
+                                self.flash = Some(Flash { text: t.into(), at: Instant::now(), color: Color32::from_rgb(70, 110, 160) });
+                            }
+                            Err(e) => self.flash = Some(Flash { text: e, at: Instant::now(), color: Color32::from_rgb(180, 70, 60) }),
+                        }
+                    }
+                }
+                let mut hide = false;
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("退出").clicked() {
                         self.ask_close = true;
                     }
-                    if ui.button("最小化").clicked() {
+                    if self.tray.is_some() {
+                        if ui.button("隐藏到托盘").on_hover_text("窗口隐藏，采集继续；单击右下角托盘图标重新显示").clicked() {
+                            hide = true;
+                        }
+                    } else if ui.button("最小化").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                     }
                 });
+                if hide {
+                    self.to_tray(&ctx);
+                }
             });
             if let Some(sh) = &sh {
                 ui.weak(format!("会话 {}", sh.session));
@@ -542,11 +750,12 @@ impl eframe::App for App {
             }
         });
 
+        let mut hide_after = false;
         if self.ask_close {
             let m = egui::Modal::new(egui::Id::new("close")).show(&ctx, |ui| {
                 ui.set_width(260.0);
                 ui.heading("关闭窗口？");
-                ui.label("退出会停止数据采集。最小化则在后台继续采集。");
+                ui.label(if self.tray.is_some() { "退出会停止数据采集。隐藏到托盘则在后台继续采集。" } else { "退出会停止数据采集。最小化则在后台继续采集。" });
                 if let Some(sh) = &self.sh {
                     let p = sh.labels.lock().unwrap().pending();
                     if p > 0 {
@@ -555,9 +764,10 @@ impl eframe::App for App {
                 }
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
-                    if ui.button("最小化（继续采集）").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    let lbl = if self.tray.is_some() { "隐藏到托盘（继续采集）" } else { "最小化（继续采集）" };
+                    if ui.button(lbl).clicked() {
                         self.ask_close = false;
+                        hide_after = true;
                     }
                     if ui.button("退出采集").clicked() {
                         self.ask_close = false;
@@ -572,9 +782,15 @@ impl eframe::App for App {
                 self.ask_close = false;
             }
         }
+        if hide_after {
+            self.to_tray(&ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Some(r) = self.hwnd.placement() {
+            self.win.rect_px = Some(r);
+        }
         save_state(&self.win);
     }
 }

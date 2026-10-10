@@ -25,9 +25,10 @@ map_img_check_s = 5
 # ---------------------------------------------------------------- 0.2.0 窗口 / 标注按钮
 [gui]
 always_on_top = true     # 窗口置顶（窗口里也可以切换，会记住）
-on_close = "ask"         # 点关闭按钮时："ask" 询问 / "minimize" 最小化继续采集 / "exit" 直接退出
+on_close = "ask"         # 点关闭按钮时："ask" 询问 / "tray" 隐藏到托盘继续采集 / "minimize" 最小化继续采集 / "exit" 直接退出
 columns = 2              # 每行按钮数
 scale = 1.0              # 界面缩放，例如 1.25
+map_url = "https://wt.zuens2020.top/proto/"   # “打开战术地图”按钮打开的网页（只支持 http/https）
 # font = "C:\\Windows\\Fonts\\msyh.ttc"   # 中文字体（默认自动找 微软雅黑 / 黑体 / 宋体）
 
 # 标注按钮（显示顺序 = 书写顺序）。id 是分析用的英文标识，text 是按钮文字，color 可省略，
