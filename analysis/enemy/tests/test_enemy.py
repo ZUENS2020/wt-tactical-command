@@ -304,5 +304,34 @@ class TestRBLabelledBattle(unittest.TestCase):
                 self.assertIsNone(find_player(f.objects))
 
 
+class TestRBOwnScoutAndHit(unittest.TestCase):
+    """Battle e5:g38 (2026-10-10 21:07-21:12), user in Sd.Kfz. 234/2 (scout vehicle).
+    Ground truth: i_scouted 21:09:47.0 (target later killed by a teammate), i_hit 21:11:41.1 with a
+    hit marker seen on the minimap, note 'd' pressed ~5-10 s after that marker vanished."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.recs = load_fx("rb_df9b_g38_iscout_ihit_note.jsonl.gz")
+        cls.tr, cls.frames, cls.huds, _ = run(cls.recs)
+        cls.labels = {v["label_id"]: t for k, t, v in stream.events(cls.recs) if k == "label"}
+
+    def test_labels(self):
+        self.assertEqual(sorted(self.labels), ["died", "i_hit", "i_scouted", "kill", "note"])
+        self.assertAlmostEqual((self.labels["note"] - self.labels["i_hit"]) / 1000, 20.9, delta=0.1)
+
+    def test_no_enemy_unit_ever_exported(self):
+        # neither the own-scouted target nor the own hit-revealed target appears in /map_obj.json
+        self.assertGreater(len(self.frames), 1500)
+        self.assertEqual(self.tr.all_contacts(), [])
+        self.assertFalse(any(is_trackable_enemy(o) for f in self.frames for o in f.objects))
+
+    def test_scouted_target_killed_by_teammate(self):
+        k = [e for e in self.huds if e.kind == "kill" and e.msg.endswith("dgan9078 (M5A1)")][0]
+        self.assertIn("Terrastorm", k.msg); self.assertFalse(k.involves_player)
+        self.assertAlmostEqual((k.t_ms - self.labels["i_scouted"]) / 1000, 48.3, delta=0.6)
+        self.assertTrue(1000 <= self.labels["kill"] - k.t_ms <= 2500)
+        self.assertFalse([e for e in self.huds if e.kind in ("scout_award", "scout_kill")])
+
+
 if __name__ == "__main__":
     unittest.main()

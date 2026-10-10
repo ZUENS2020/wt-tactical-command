@@ -18,6 +18,10 @@ RB ground evidence (2026-10-10, sessions 1709 + df9b with GUI labels, ~6 battles
     labelled hit-only battle (gen 35) had 0 markers; the 2 team_scouted labels had 0 markers +-15 s.
   * every marker was 330-470 m from the player and 53-180 m from the nearest teammate.
 So for live-tracked RB markers the scout-vs-hit cause is NOT separable from map_obj fields (R6).
+Battle e5:g38 (user in a scout vehicle, own i_scouted + own i_hit with an on-screen hit marker):
+  0 enemy units in 2,990 frames -> the game does NOT export own scouting or hit-reveal markers to
+  /map_obj.json. On-screen hit reveal lasted ~6-16 s (i_hit -> note 'd' 20.9 s, 'd' pressed 5-15 s late).
+  Practical consequence: hit_revealed/scouted can only come from hudmsg/labels, never from map_obj alone.
 """
 from .classify import red_shade
 
