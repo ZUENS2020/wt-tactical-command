@@ -7,8 +7,8 @@ type SymRec = { svg: string; ax: number; ay: number; w: number; h: number };
 const LIB = SYMS as Record<string, SymRec>;
 const imgs = new Map<string, HTMLImageElement>();
 const cache = new Map<string, { c: HTMLCanvasElement; ax: number; ay: number; w: number; h: number }>();
-export function unitSprite(sidc: string, size: number, opt: { fill?: string; dashed?: boolean; grey?: boolean } = {}, dpr = 1) {
-  const v = opt.grey ? 'g' : opt.fill ? 'self' : opt.dashed ? 'd' : 'n';
+export function unitSprite(sidc: string, size: number, opt: { fill?: string; dashed?: boolean; grey?: boolean; squad?: boolean } = {}, dpr = 1) {
+  const v = opt.grey ? 'g' : opt.fill ? 'self' : opt.squad ? 'sq' : opt.dashed ? 'd' : 'n';
   const key = `${sidc}|${v}`;
   const ck = `${key}|${size}|${dpr}`;
   const hit = cache.get(ck);

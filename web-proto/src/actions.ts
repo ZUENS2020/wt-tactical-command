@@ -1,9 +1,19 @@
 import { getState, setState, toast, newId, type Drawing, type Tool, type ViewMode, type State } from './store';
-import { battleTime, getSnapshot } from './sim';
+import { battleTime, getSnapshot } from './data';
 import { gridRef, type MapId, type V2 } from './geo';
 import { CAT_LABEL } from './symbols';
+import { DEMO } from './mode';
+import { cfg, syncPut, syncDel, onRemote } from './live';
 
-const ME = '朔风';
+let ME = DEMO ? '朔风' : cfg.nick();
+export function refreshNick() { if (!DEMO) ME = cfg.nick(); }
+export function myName() { return ME; }
+const live = !DEMO;
+const mapOf = (d: Drawing): MapId => (d.scope === 'air' ? 'air' : 'ground');
+onRemote((k, d) => {
+  if (k === 'add') toast(`${d.by || '队友'} 添加了${kindName(d)} · ${gridRef(mapOf(d), d.pts[0])}`, { tone: 'sync' });
+  else toast(`${d.by || '队友'} 删除了${kindName(d)}`, { tone: 'sync' });
+});
 const PL_NAMES = ['PL 红', 'PL 蓝', 'PL 绿', 'PL 白'];
 export const AREA_LABEL = { airstrike: '空袭区', recon: '侦察区', warning: '警戒区' } as const;
 export const ROUTE_LABEL = { route: '路线', arrow: '进攻箭头', phase: '阶段线' } as const;
@@ -39,7 +49,8 @@ export function addDrawing(d: Omit<Drawing, 'id' | 'v' | 't' | 'by' | 'scope'> &
   const full: Drawing = { id: newId(), v: 1, t: battleTime(), by, scope: 'both', ...d } as Drawing;
   setState((s) => ({ drawings: [...s.drawings, full] }));
   if (by === ME) pushUndo({ kind: 'add', after: full });
-  if (!silent && by === ME) toast(`已添加${kindName(full)} · ${gridRef('ground', full.pts[0])}`);
+  if (live && by === ME) syncPut(full);
+  if (!silent && by === ME) toast(`已添加${kindName(full)} · ${gridRef(mapOf(full), full.pts[0])}`);
   return full;
 }
 
@@ -50,6 +61,7 @@ export function updateDrawing(id: string, patch: Partial<Drawing>, record = true
   const after = { ...before, ...patch, v: before.v + 1 };
   setState({ drawings: s.drawings.map((d) => (d.id === id ? after : d)) });
   if (record) pushUndo({ kind: 'upd', before, after });
+  if (live) syncPut(after);
 }
 
 export function deleteDrawing(id: string, by = ME) {
@@ -57,6 +69,7 @@ export function deleteDrawing(id: string, by = ME) {
   const before = s.drawings.find((d) => d.id === id);
   if (!before) return;
   setState({ drawings: s.drawings.filter((d) => d.id !== id), selectedId: s.selectedId === id ? null : s.selectedId, moving: false });
+  if (live && by === ME) syncDel(id, ME);
   if (by === ME) { pushUndo({ kind: 'del', before }); toast(`已删除${kindName(before)}`, { undo: true }); }
 }
 
@@ -66,9 +79,9 @@ export function undo() {
   if (!op) { toast('没有可撤销的操作'); return; }
   setState({ undo: s.undo.slice(0, -1) });
   const ds = getState().drawings;
-  if (op.kind === 'add' && op.after) setState({ drawings: ds.filter((d) => d.id !== op.after!.id), selectedId: null });
-  if (op.kind === 'del' && op.before) setState({ drawings: [...ds, op.before] });
-  if (op.kind === 'upd' && op.before) setState({ drawings: ds.map((d) => (d.id === op.before!.id ? op.before! : d)) });
+  if (op.kind === 'add' && op.after) { setState({ drawings: ds.filter((d) => d.id !== op.after!.id), selectedId: null }); if (live) syncDel(op.after.id, ME); }
+  if (op.kind === 'del' && op.before) { setState({ drawings: [...ds, op.before] }); if (live) syncPut(op.before); }
+  if (op.kind === 'upd' && op.before) { setState({ drawings: ds.map((d) => (d.id === op.before!.id ? op.before! : d)) }); if (live) syncPut(op.before); }
   toast('已撤销');
 }
 
@@ -88,7 +101,7 @@ export function finishDraft() {
     if (d.pts.length < 2) { toast('至少需要两个点'); return; }
     const kind = s.routeType;
     const nPhase = s.drawings.filter((x) => x.kind === 'phase').length;
-    addDrawing({ kind, pts: d.pts, label: kind === 'phase' ? PL_NAMES[nPhase % PL_NAMES.length] : '', status: s.newStatus, showTime: false, smooth: kind !== 'phase' && s.smooth });
+    addDrawing({ kind, scope: live ? d.map : 'both', pts: d.pts, label: kind === 'phase' ? PL_NAMES[nPhase % PL_NAMES.length] : '', status: s.newStatus, showTime: false, smooth: kind !== 'phase' && s.smooth });
     setState({ draft: null });
   }
 }
@@ -116,7 +129,7 @@ export function tapMap(map: MapId, w: V2, hitId: string | null, dbl = false) {
     }
     case 'point': {
       const cat = s.pointCat;
-      const d = addDrawing({ kind: 'point', cat, pts: [w], label: '', status: s.newStatus, showTime: cat === 'enemy' || cat === 'danger' });
+      const d = addDrawing({ kind: 'point', scope: live ? map : 'both', cat, pts: [w], label: '', status: s.newStatus, showTime: cat === 'enemy' || cat === 'danger' });
       setState({ selectedId: d.id });
       return;
     }
@@ -131,16 +144,16 @@ export function tapMap(map: MapId, w: V2, hitId: string | null, dbl = false) {
       if (!s.draft) { setState({ draft: { tool: 'area', map, pts: [w] } }); return; }
       const p0 = s.draft.pts[0];
       if (s.areaShape === 'rect') {
-        addDrawing({ kind: 'area', areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
+        addDrawing({ kind: 'area', scope: live ? map : 'both', areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
       } else {
-        addDrawing({ kind: 'circle', areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
+        addDrawing({ kind: 'circle', scope: live ? map : 'both', areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
       }
       setState({ draft: null });
       return;
     }
     case 'source': {
       if (!s.draft) { setState({ draft: { tool: 'source', map, pts: [w] } }); return; }
-      addDrawing({ kind: 'source', pts: [s.draft.pts[0], w], sector: s.sourceSector, label: '未确认', status: 'present', showTime: true });
+      addDrawing({ kind: 'source', scope: live ? map : 'both', pts: [s.draft.pts[0], w], sector: s.sourceSector, label: '未确认', status: 'present', showTime: true });
       setState({ draft: null });
       return;
     }
@@ -160,6 +173,7 @@ export function centroid(pts: V2[]): V2 {
 // ---------- seeded room content (as if already drawn before you joined) ----------
 const g = (x: number, y: number): V2 => [x * 4096, y * 4096];
 export function seedIfEmpty() {
+  if (live) return;
   const s = getState();
   if (s.drawings.length) return;
   const mk = (d: Partial<Drawing>): Drawing => ({ id: newId(), v: 1, t: 340, by: '死神', scope: 'both', label: '', status: 'present', showTime: false, pts: [], kind: 'point', ...d } as Drawing);
@@ -177,6 +191,7 @@ export function seedIfEmpty() {
 // ---------- simulated second user ----------
 let collabStep = 0;
 export function startCollab() {
+  if (live) return;
   const run = () => {
     const s = getState();
     if (s.collab) collabAction();

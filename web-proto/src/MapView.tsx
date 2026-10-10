@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { MAPS, canonToNorm, normToCanon, gridBox, rowLetter, metersPerNorm, metersPerCanon, bearingDeg, dist, fmtDist, fmtBearing, fmtClock, type MapId, type V2 } from './geo';
+import { MAPS, canonToNorm, normToCanon, gridBox, rowLetter, metersPerNorm, metersPerCanon, bearingDeg, dist, fmtDist, fmtBearing, fmtClock, separateMaps, type MapId, type V2 } from './geo';
 import { getState, setState, useStore, type Drawing, type ViewState } from './store';
 import { tapMap } from './actions';
-import { getSnapshot, ICON_SIDC, ICON_ZH, battleTime } from './sim';
+import { getSnapshot, ICON_SIDC, ICON_ZH, battleTime } from './data';
+import { useFresh } from './TopBar';
+import { DEMO } from './mode';
 import { unitSprite, PointGlyph } from './symbols';
 import { sampleSmooth, polyD, headD, attackArrowD, polyDist, wedgeD, trimEnd } from './draw';
 import { C } from './theme';
@@ -10,7 +12,12 @@ import { C } from './theme';
 const imgCache = new Map<string, HTMLImageElement>();
 function getImg(src: string, onload: () => void) {
   let im = imgCache.get(src);
-  if (!im) { im = new Image(); im.src = src; imgCache.set(src, im); }
+  if (!im) {
+    im = new Image(); im.src = src; imgCache.set(src, im);
+    // live map images may be uploaded a moment after the map switch: retry
+    const me = im;
+    im.addEventListener('error', () => window.setTimeout(() => { if (imgCache.get(src) === me) imgCache.delete(src); onload(); }, 2500), { once: true });
+  }
   if (!im.complete) im.addEventListener('load', onload, { once: true });
   return im;
 }
@@ -28,9 +35,9 @@ function clampView(v: ViewState): ViewState {
   return { cx: z <= 1 ? 0.5 : cx, cy: z <= 1 ? 0.5 : cy, z };
 }
 
-interface Props { map: MapId; size: number; interactive: boolean; dual: boolean; }
+interface Props { map: MapId; size: number; interactive: boolean; dual: boolean; feed?: boolean; }
 
-export default function MapView({ map, size: S, interactive, dual }: Props) {
+export default function MapView({ map, size: S, interactive, dual, feed }: Props) {
   const baseRef = useRef<HTMLCanvasElement>(null);
   const liveRef = useRef<HTMLCanvasElement>(null);
   const [view, setViewLocal] = useState<ViewState>(() => clampView(getState().views[map] ?? defaultView(map)));
@@ -46,6 +53,7 @@ export default function MapView({ map, size: S, interactive, dual }: Props) {
   const tool = useStore((s) => s.tool);
   const moving = useStore((s) => s.moving);
   const rulerSpeed = useStore((s) => s.rulerSpeed);
+  useStore((s) => s.mapRev);
   const cfg = MAPS[map];
   const compact = S < 330;
 
@@ -67,10 +75,11 @@ export default function MapView({ map, size: S, interactive, dual }: Props) {
     const ctx = cv.getContext('2d')!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = '#d9d6ca'; ctx.fillRect(0, 0, S, S);
-    const im = getImg(cfg.img, () => force((x) => x + 1));
+    if (!cfg.available) return;
+    const im = cfg.img ? getImg(cfg.img, () => force((x) => x + 1)) : null;
     const v = view;
     const o = toS([0, 0], v), full = S * v.z;
-    if (im.complete && im.naturalWidth) {
+    if (im && im.complete && im.naturalWidth) {
       // source rect for visible part (keeps huge zooms cheap); proportional only
       const n0 = fromS([0, 0], v), n1 = fromS([S, S], v);
       const sx0 = Math.max(0, n0[0]), sy0 = Math.max(0, n0[1]), sx1 = Math.min(1, n1[0]), sy1 = Math.min(1, n1[1]);
@@ -124,7 +133,7 @@ export default function MapView({ map, size: S, interactive, dual }: Props) {
         }
       }
     }
-    if (map === 'air') {
+    if (map === 'air' && !separateMaps()) {
       // ground battle area (mock ground→air transform) as dashed outline on the air overview
       const gb = gridBox('ground');
       const a = toS(canonToNorm('air', [gb.x0 * 4096, gb.y0 * 4096]), v), c2 = toS(canonToNorm('air', [(gb.x0 + gb.w) * 4096, (gb.y0 + gb.h) * 4096]), v);
@@ -252,7 +261,7 @@ export default function MapView({ map, size: S, interactive, dual }: Props) {
 
   const zoomBy = (k: number) => { const v = viewRef.current; setView({ ...v, z: Math.min(ZMAX[map], Math.max(1, v.z * k)) }); };
   const centerSelf = () => {
-    const me = getSnapshot().friends.find((f) => f.self);
+    const me = getSnapshot().friends.find((f) => f.self && (!f.only || f.only === map));
     if (!me) return;
     const n = canonToNorm(map, me.w);
     const v = viewRef.current;
@@ -276,7 +285,9 @@ export default function MapView({ map, size: S, interactive, dual }: Props) {
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onWheel={onWheel}
         onPointerLeave={(e) => { if (e.pointerType === 'mouse' && ptrs.current.size === 0) setState({ hover: null }); }}
         onContextMenu={(e) => e.preventDefault()} />
-      {dual && <div className="mapchip">{cfg.title}<span>{cfg.sub}</span></div>}
+      {dual && <div className="mapchip">{cfg.title}<span>{cfg.available ? cfg.sub : '—'}</span></div>}
+      {!DEMO && <MapStatus map={map} />}
+      {feed && <FeedOverlay compact={compact} />}
       <div className="corner" style={{ gap: compact ? 4 : 6 }}>
         <button className="cbtn" style={{ width: btn, height: btn }} onClick={() => zoomBy(1.5)} aria-label="放大" title="放大">
           <svg viewBox="0 0 20 20"><path d="M10 4v12M4 10h12" /></svg></button>
@@ -331,7 +342,7 @@ function DrawingsSvg(props: {
   useEffect(() => { const id = setInterval(() => tick((x) => x + 1), 1000); return () => clearInterval(id); }, []);
   const bt = battleTime();
   const s = getState();
-  const ov = gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * view.z < 240;
+  const ov = !separateMaps() && gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * view.z < 240;
   const fs = compact ? 10 : S >= 600 ? 12 : 11;
   const hw = ov ? 3.5 : compact ? 6 : S >= 600 ? 9 : 7.5;
   const gs = ov ? 0.5 : compact ? 0.82 : S >= 600 ? 1.12 : 1;
@@ -530,7 +541,8 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
   const cellPx = gridBox(map).stepX * S * v.z;
   const usz = S >= 600 ? 21 : S >= 420 ? 18 : 15;
   // air overview: the ground battle area is tiny → shrink ground objects, hide their labels (plan §5.3)
-  const ov = gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * v.z < 240;
+  const ov = !separateMaps() && gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * v.z < 240;
+  if (!MAPS[map].available) return;
 
   // static objects: friendly airfield + bombing points
   if (snap.airfield && map === 'air') {
@@ -546,38 +558,100 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
     ctx.strokeStyle = C.enemy; ctx.lineWidth = 1.5; ctx.strokeRect(p[0] - 4, p[1] - 4, 8, 8);
   }
 
-  // enemies (auto layer, filtered by enemyPolicy)
+  // radio: pings at the target grid cell (uniform, ~30 s) + location calls at the sender (brief)
+  for (const pg of snap.pings) {
+    if (pg.only !== map) continue;
+    const c = toS(pg.w);
+    const k = Math.max(0, Math.min(1, pg.remainMs / pg.ttlMs));
+    if (pg.area) {
+      const a = toS(pg.area[0]), b = toS(pg.area[1]);
+      ctx.fillStyle = `rgba(201,120,15,${0.10 + 0.10 * k})`; ctx.fillRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+      ctx.setLineDash([5, 3]); ctx.strokeStyle = `rgba(201,120,15,${0.5 + 0.4 * k})`; ctx.lineWidth = 1.6; ctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]); ctx.setLineDash([]);
+    }
+    if (!inView(c, 40)) continue;
+    const ph = (now % 1400) / 1400;
+    ctx.strokeStyle = `rgba(201,120,15,${0.7 * (1 - ph)})`; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(c[0], c[1], 8 + ph * 18, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(c[0], c[1], 11, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = C.order; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(c[0], c[1], 11, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); ctx.stroke();
+    ctx.fillStyle = C.order; ctx.beginPath(); ctx.arc(c[0], c[1], 4, 0, Math.PI * 2); ctx.fill();
+    if (pg.area) { const a = toS(pg.area[0]); label(`${pg.grid ?? ''} 标点 ${Math.ceil(pg.remainMs / 1000)}s`, Math.max(4, a[0] + 3), Math.max(8, a[1] + 9), C.order, compact ? 10 : 11, 'left'); }
+    else label(`标点 ${Math.ceil(pg.remainMs / 1000)}s`, c[0], c[1] - 20, C.order, compact ? 10 : 11);
+  }
+  for (const cl of snap.calls) {
+    if (cl.only !== map) continue;
+    const c = toS(cl.w); if (!inView(c, 40)) continue;
+    const k = Math.max(0, Math.min(1, cl.remainMs / cl.ttlMs));
+    ctx.globalAlpha = 0.35 + 0.65 * k;
+    const ph = (now % 1000) / 1000;
+    ctx.strokeStyle = `rgba(43,98,196,${0.8 * (1 - ph)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(c[0], c[1], 10 + ph * 14, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = C.friend; ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(c[0], c[1] - 9); ctx.lineTo(c[0] + 8, c[1] + 6); ctx.lineTo(c[0] - 8, c[1] + 6); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = font(10, 800); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', c[0], c[1] + 1);
+    label(cl.text, c[0], c[1] + 18, C.friend, compact ? 10 : 11);
+    ctx.globalAlpha = 1;
+  }
+
+  // friendlies (self / squad green / teammates blue)
+  if (s.layers.friendly) {
+    const rank = (r: string) => (r === 'self' ? 2 : r === 'squad' ? 1 : 0);
+    const fr = snap.friends.filter((f) => !f.only || f.only === map).sort((a, b) => rank(a.role) - rank(b.role));
+    for (const f of fr) {
+      const p = toS(f.w);
+      if (!inView(p)) continue;
+      const stale = !f.alive || f.ageMs > 2500;
+      const squad = f.role === 'squad';
+      const tone = f.self ? '#d9a100' : squad ? C.squad : C.friend;
+      const col = stale ? C.stale : f.self ? '#b8890a' : tone;
+      const small = ov && !f.air;
+      if (!stale && f.hdg != null) {
+        const a = f.hdg * Math.PI / 180;
+        const L = small ? 11 : usz + 4;
+        const tip: V2 = [p[0] + Math.sin(a) * L, p[1] - Math.cos(a) * L];
+        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke();
+        ctx.strokeStyle = tone; ctx.lineWidth = 2.2;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke(); ctx.lineCap = 'butt';
+        const hx = Math.sin(a), hy = -Math.cos(a);
+        ctx.fillStyle = tone;
+        const hs = small ? 3 : 4.5;
+        ctx.beginPath(); ctx.moveTo(tip[0] + hx * hs * 1.1, tip[1] + hy * hs * 1.1); ctx.lineTo(tip[0] - hy * hs, tip[1] + hx * hs); ctx.lineTo(tip[0] + hy * hs, tip[1] - hx * hs); ctx.closePath(); ctx.fill();
+      }
+      const size = small ? (f.self ? 13 : 11) : f.self ? usz + 2 : squad ? usz : usz - 2;
+      const sp = sprite(f.sidc, size, p[0], p[1], { fill: f.self && !stale ? C.self : undefined, squad: squad && !stale, grey: stale }, stale ? 0.75 : 1);
+      if (f.self && !f.alive) {
+        // dead: cross over the last own position (the Player icon now follows the spectated teammate)
+        ctx.strokeStyle = C.enemy; ctx.lineWidth = 2.4; const r = size * 0.45;
+        ctx.beginPath(); ctx.moveTo(p[0] - r, p[1] - r); ctx.lineTo(p[0] + r, p[1] + r); ctx.moveTo(p[0] + r, p[1] - r); ctx.lineTo(p[0] - r, p[1] + r); ctx.stroke();
+      }
+      if (s.layers.labels && (!small || f.self) && (f.self || f.nick)) {
+        const t = f.self && !f.alive ? `${f.nick} · 阵亡 ${Math.floor(f.ageMs / 1000)}s` : stale && f.nick ? `${f.nick} · ${Math.floor(f.ageMs / 1000)}s` : f.nick;
+        if (t && (f.self || cellPx > 120)) label(t, p[0], p[1] + sp.h - sp.ay + 7, col, S >= 600 ? 12 : compact ? 10 : 11);
+      }
+    }
+  }
+
+  // enemies: only the occasional live red markers 8111 exports (spawn-proximity reveals → 压家) + short last-seen ghost
   if (s.policy !== 'off' && s.layers.enemy) {
-    for (const c of snap.contacts) {
-      if (!c.visible && s.policy !== 'fused') continue;
-      if (c.only && c.only !== map) continue;
+    const fused = s.policy === 'fused';
+    const list = snap.contacts.filter((c) => !c.only || c.only === map).sort((a, b) => Number(a.visible) - Number(b.visible));
+    for (const c of list) {
+      const life = c.air ? (fused ? 15000 : 5000) : (fused ? 30000 : 8000);
+      if (!c.visible && c.ageMs > life) continue;
       const p = toS(c.w);
       if (!inView(p, 60)) continue;
       const sidc = ICON_SIDC[c.icon] ?? 'SHGPU-----';
-      const sz = c.air ? usz : ov ? 10 : usz - 2;
+      const sz = c.air ? usz : ov ? 10 : usz;
       const rr = sz * 0.72;
       if (c.visible) {
-        if (c.reveal === 'hit') {
-          // brief flash: expanding ring + blink
-          const ph = (c.sinceMs % 900) / 900;
-          ctx.strokeStyle = `rgba(200,40,28,${0.85 * (1 - ph)})`; ctx.lineWidth = 2.5;
-          ctx.beginPath(); ctx.arc(p[0], p[1], rr + ph * rr * 1.8, 0, Math.PI * 2); ctx.stroke();
-          const on = Math.floor(now / 180) % 2 === 0;
-          sprite(sidc, sz, p[0], p[1], { dashed: true }, on ? 1 : 0.35);
-          if (!ov) label('命中暴露', p[0], p[1] + sz + 2, C.enemy, compact ? 9 : 10);
-          continue;
-        }
-        if (c.reveal === 'scouted') {
-          const rem = Math.max(0, (c.remainMs ?? 0) / 30000);
-          ctx.setLineDash([4, 3]); ctx.strokeStyle = 'rgba(200,40,28,0.85)'; ctx.lineWidth = 1.6;
-          const R2 = rr * 1.45;
-          ctx.beginPath(); ctx.arc(p[0], p[1], R2, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
-          ctx.strokeStyle = C.enemy; ctx.lineWidth = ov ? 2 : 3;
-          ctx.beginPath(); ctx.arc(p[0], p[1], R2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * rem); ctx.stroke();
-          if (!ov) label(`侦察 ${Math.ceil((c.remainMs ?? 0) / 1000)}s`, p[0], p[1] + R2 + 9, C.enemy, compact ? 9 : 10);
-        }
-        if (c.blink === 2 && c.reveal !== 'air') {
-          const ph = (Math.sin(now / 160) + 1) / 2;
+        const camp = !DEMO && !c.air && (c.spawnM == null || c.spawnM <= 400);
+        const ph = (Math.sin(now / 150) + 1) / 2;
+        if (camp) {
+          ctx.fillStyle = `rgba(240,20,0,${0.10 + 0.10 * ph})`;
+          ctx.beginPath(); ctx.arc(p[0], p[1], rr * 2.1, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = `rgba(220,20,0,${0.55 + 0.45 * ph})`; ctx.lineWidth = 3;
+          ctx.beginPath(); ctx.arc(p[0], p[1], rr * 1.5 + ph * 4, 0, Math.PI * 2); ctx.stroke();
+        } else if (c.blink === 2 && c.reveal !== 'air') {
           ctx.strokeStyle = `rgba(240,12,0,${0.35 + 0.5 * ph})`; ctx.lineWidth = ov ? 1.4 : 2;
           ctx.beginPath(); ctx.arc(p[0], p[1], rr + 1 + ph * 3, 0, Math.PI * 2); ctx.stroke();
         }
@@ -587,12 +661,16 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
           ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] + Math.sin(a) * 17, p[1] - Math.cos(a) * 17); ctx.stroke();
         }
         sprite(sidc, sz, p[0], p[1], { dashed: true });
-        if (!ov && cellPx > 150 && s.layers.labels && c.reveal !== 'scouted') label(ICON_ZH[c.icon] ?? c.icon, p[0], p[1] + sz - 1, C.enemy, compact ? 9 : 10);
+        if (camp) {
+          const t = `压家 · ${ICON_ZH[c.icon] ?? c.icon}${c.spawnM != null ? ` ${Math.round(c.spawnM)}m` : ''}`;
+          ctx.font = font(compact ? 11 : 12, 800); const w = ctx.measureText(t).width + 10, y = p[1] - sz - 12;
+          ctx.fillStyle = 'rgba(200,24,10,0.92)'; ctx.fillRect(p[0] - w / 2, y - 9, w, 18);
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, p[0], y + 0.5);
+        } else if (!ov && (cellPx > 150 || !DEMO) && s.layers.labels) label(ICON_ZH[c.icon] ?? c.icon, p[0], p[1] + sz - 1, C.enemy, compact ? 9 : 10);
       } else {
-        // ghost / last known (fused only)
-        const life = c.air ? 15000 : 30000;
+        // ghost / last seen
         const k = 1 - c.ageMs / life;
-        if (c.air && c.hdg != null) {
+        if (fused && c.air && c.hdg != null) {
           const a = c.hdg * Math.PI / 180;
           const sp = (c.speed ?? 0);
           const sec = c.ageMs / 1000;
@@ -610,38 +688,33 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
         const r = c.air ? sz * 0.45 : ov ? 5 : sz * 0.5;
         ctx.beginPath(); ctx.moveTo(p[0], p[1] - r); ctx.lineTo(p[0] + r, p[1]); ctx.lineTo(p[0], p[1] + r); ctx.lineTo(p[0] - r, p[1]); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);
         ctx.globalAlpha = 1;
-        if (!ov || c.air) label(`${Math.floor(c.ageMs / 1000)}s`, p[0], p[1] + r + 8, `rgba(200,40,28,${Math.max(0.4, k)})`, compact ? 9 : 10);
+        if (!ov || c.air) label(`${Math.floor(c.ageMs / 1000)}s 前`, p[0], p[1] + r + 8, `rgba(200,40,28,${Math.max(0.4, k)})`, compact ? 9 : 10);
       }
     }
   }
+}
 
-  // friendlies
-  if (s.layers.friendly) {
-    const fr = [...snap.friends].sort((a, b) => Number(a.self) - Number(b.self));
-    for (const f of fr) {
-      const p = toS(f.w);
-      if (!inView(p)) continue;
-      const stale = !f.alive || f.ageMs > 2000;
-      const col = stale ? C.stale : f.self ? '#b8890a' : C.friend;
-      const small = ov && !f.air;
-      if (!stale) {
-        const a = f.hdg * Math.PI / 180;
-        const L = small ? 11 : usz + 4;
-        const tip: V2 = [p[0] + Math.sin(a) * L, p[1] - Math.cos(a) * L];
-        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke();
-        ctx.strokeStyle = f.self ? '#d9a100' : C.friend; ctx.lineWidth = 2.2;
-        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke(); ctx.lineCap = 'butt';
-        const hx = Math.sin(a), hy = -Math.cos(a);
-        ctx.fillStyle = f.self ? '#d9a100' : C.friend;
-        const hs = small ? 3 : 4.5;
-        ctx.beginPath(); ctx.moveTo(tip[0] + hx * hs * 1.1, tip[1] + hy * hs * 1.1); ctx.lineTo(tip[0] - hy * hs, tip[1] + hx * hs); ctx.lineTo(tip[0] + hy * hs, tip[1] - hx * hs); ctx.closePath(); ctx.fill();
-      }
-      const sp = sprite(f.sidc, small ? (f.self ? 13 : 11) : f.self ? usz + 2 : usz, p[0], p[1], { fill: f.self ? C.self : undefined, grey: stale }, stale ? 0.75 : 1);
-      if (s.layers.labels && (!small || f.self)) {
-        const t = stale ? `${f.nick} · ${f.alive ? '' : '阵亡 '}${Math.floor(f.ageMs / 1000)}s` : f.nick;
-        label(t, p[0], p[1] + sp.h - sp.ay + 7, col, S >= 600 ? 12 : compact ? 10 : 11);
-      }
-    }
+// ---------- live overlays ----------
+function MapStatus({ map }: { map: MapId }) {
+  const snap = useFresh();
+  const cfg = MAPS[map];
+  if (!cfg.available) {
+    const t = snap.conn === 'auth' ? '需要房间密码（右上角设置）' : snap.conn === 'offline' ? '与服务器断开，重连中…' : snap.conn === 'connecting' ? '连接中…'
+      : map === 'air' ? '暂无空战视图（驾驶飞机时出现）' : '等待对局数据…';
+    return <div className="mapidle"><b>{map === 'ground' ? '陆战' : '空战'}</b><span>{t}</span></div>;
   }
+  if (!snap.inBattle) return <div className="mapnote">机库中 · 上一局地图</div>;
+  if (!cfg.img) return <div className="mapnote">底图加载中…</div>;
+  return null;
+}
+
+function FeedOverlay({ compact }: { compact: boolean }) {
+  const snap = useFresh();
+  const lines = snap.feed.filter((f) => f.ageMs < 8000).slice(-3);
+  if (!lines.length) return null;
+  return (
+    <div className={'killfeed' + (compact ? ' compact' : '')} aria-live="polite">
+      {lines.map((f) => <div key={f.id} className={(f.me ? 'me ' : '') + (f.dead ? 'dead' : '')} style={{ opacity: Math.min(1, (8000 - f.ageMs) / 1500) }}>{f.text}</div>)}
+    </div>
+  );
 }

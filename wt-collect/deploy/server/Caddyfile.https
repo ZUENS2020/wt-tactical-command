@@ -3,7 +3,7 @@
 	admin localhost:2019
 }
 
-(wt_proxy) {
+(wt_backend) {
 	request_body {
 		max_size 32MB
 	}
@@ -17,6 +17,9 @@
 	reverse_proxy 127.0.0.1:18111 {
 		flush_interval -1
 	}
+}
+
+(wt_log) {
 	log {
 		output file /var/log/caddy/wt-access.log {
 			roll_size 20MiB
@@ -25,10 +28,35 @@
 	}
 }
 
+(wt_app) {
+	root * /var/www/wt-live
+	encode zstd gzip
+	header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	header /index.html Cache-Control "no-cache"
+	header /sw.js Cache-Control "no-cache"
+	try_files {path} /index.html
+	file_server
+}
+
 http://43.129.251.18 {
-	import wt_proxy
+	import wt_backend
+	import wt_log
 }
 
 wt.zuens2020.top {
-	import wt_proxy
+	import wt_log
+	# receiver: uploads, API (incl. /api/live WebSocket + /api/map images), status page
+	@backend path /api/* /img/* /healthz /status
+	handle @backend {
+		import wt_backend
+	}
+	# live tactical map (static build); /proto/ kept for the collector's "打开战术地图" button and old links
+	redir /proto /proto/ 308
+	handle_path /proto/* {
+		import wt_app
+	}
+	handle {
+		header / Cache-Control "no-cache"
+		import wt_app
+	}
 }

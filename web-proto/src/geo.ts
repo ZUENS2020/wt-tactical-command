@@ -11,6 +11,9 @@ export interface MapCfg {
   gridZero: V2; gridSteps: V2; gridSize: V2;
   hudType: number;
   imgPx: number;
+  /** live: a map of this kind is known for the current battle */
+  available: boolean;
+  hash: string | null;
 }
 
 export const MAPS: Record<MapId, MapCfg> = {
@@ -18,13 +21,13 @@ export const MAPS: Record<MapId, MapCfg> = {
     id: 'ground', title: '陆战', sub: '靶场 · firing_range', img: 'maps/ground_firing_range.jpg',
     min: [0, 0], max: [4096, 4096],
     gridZero: [1519.449951171875, 2497.25], gridSteps: [225, 225], gridSize: [1600, 1600],
-    hudType: 1, imgPx: 2048,
+    hudType: 1, imgPx: 2048, available: true, hash: 'demo-ground',
   },
   air: {
     id: 'air', title: '空战', sub: '丹麦 · air_denmark', img: 'maps/air_denmark.jpg',
     min: [-65536, -65536], max: [65536, 65536],
     gridZero: [6494.30078125, 19547.5], gridSteps: [5500, 5500], gridSize: [52719.398, 55385.301],
-    hudType: 0, imgPx: 2048,
+    hudType: 0, imgPx: 2048, available: true, hash: 'demo-air',
   },
 };
 
@@ -35,17 +38,23 @@ const K = 0.1875;
 const A: V2 = [0.574, 0.39];
 export const CANON = 4096;
 
+/** live mode: each map has its own canonical space (norm × 4096); no ground→air transform is known */
+let SEPARATE = false;
+export function setSeparateMaps(v: boolean) { SEPARATE = v; }
+export function separateMaps() { return SEPARATE; }
+
 export function canonToNorm(map: MapId, w: V2): V2 {
   const gx = w[0] / CANON, gy = w[1] / CANON;
-  if (map === 'ground') return [gx, gy];
+  if (map === 'ground' || SEPARATE) return [gx, gy];
   return [A[0] + K * gx, A[1] + K * gy];
 }
 export function normToCanon(map: MapId, n: V2): V2 {
-  if (map === 'ground') return [n[0] * CANON, n[1] * CANON];
+  if (map === 'ground' || SEPARATE) return [n[0] * CANON, n[1] * CANON];
   return [((n[0] - A[0]) / K) * CANON, ((n[1] - A[1]) / K) * CANON];
 }
 /** metres per canonical unit when measured on the given map */
 export function metersPerCanon(map: MapId) {
+  if (SEPARATE) return (MAPS[map].max[0] - MAPS[map].min[0]) / CANON;
   return map === 'ground' ? 1 : (K * 131072) / CANON;
 }
 export function metersPerNorm(map: MapId) {

@@ -81,6 +81,8 @@ pub struct Markers {
     pub out: Vec<Value>,
     pub recent: VecDeque<Value>,
     pub counts: BTreeMap<String, u64>,
+    /// own in-game nickname (overrides radio::OWN_NAMES for own-message detection)
+    pub own: Option<String>,
 }
 
 fn vmax(ty: &str) -> f64 {
@@ -144,7 +146,10 @@ impl Markers {
                         if !self.chat_seen.insert(id) {
                             continue;
                         }
-                        let msg = parse_chat(m, OWN_NAMES);
+                        let msg = match &self.own {
+                            Some(n) => parse_chat(m, &[n.as_str()]),
+                            None => parse_chat(m, OWN_NAMES),
+                        };
                         if backlog || msg.enemy {
                             *self.counts.entry("chat_backlog_or_enemy".into()).or_default() += 1;
                             continue;
@@ -442,6 +447,11 @@ impl Markers {
             self.emit(json!({"ev": "signal_only", "t": s.t_start, "sig": s.id, "track": s.track, "role": s.role, "icon": s.icon,
                 "x": s.x, "y": s.y, "cell": cell, "source": "map"}));
         }
+    }
+
+    /// Role of the friendly track sitting exactly at (x, y) in the last frame (self / squad / ally / unknown).
+    pub fn role_at(&self, x: f64, y: f64, icon: &str) -> Option<&'static str> {
+        self.tracks.iter().find(|t| t.icon == icon && (t.x - x).abs() < 1e-9 && (t.y - y).abs() < 1e-9).map(|t| t.role())
     }
 
     /// Live view for /api/status: current friendly units by role + pings of the last PING_TTL_MS.

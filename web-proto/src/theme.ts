@@ -1,6 +1,7 @@
 export const C = {
   friend: '#2b62c4',
   friendFill: '#a8c3ea',
+  squad: '#2a8a1c',     // squadmates (8111 #67D756 / #39D921)
   self: '#faC81E',
   enemy: '#c8281c',
   enemyFill: '#f2aaa0',

@@ -8,16 +8,25 @@ interface Track { id: number; icon: string; type: string; s: Smp[]; end: number;
 interface Seg { t0: number; dur: number; self: [number, number, number, number | null, string][]; tracks: Track[]; airfield: number[] | null; bombing: [number, number, number][]; }
 const R = replay as unknown as { ground: Seg; air: Seg };
 
+export type Role = 'self' | 'squad' | 'ally';
 export interface Friend {
-  id: string; nick: string; air: boolean; sidc: string; w: V2; hdg: number;
+  id: string; nick: string; air: boolean; sidc: string; w: V2; hdg: number | null;
   self: boolean; alive: boolean; ageMs: number; real: boolean; vehicle: string;
+  role: Role; only?: 'ground' | 'air'; spectating?: boolean;
 }
-export type Reveal = 'static' | 'highlight' | 'scouted' | 'hit' | 'air';
+export type Reveal = 'static' | 'highlight' | 'air';
 export interface Contact {
   id: string; icon: string; air: boolean; w: V2; hdg: number | null; blink: number;
   visible: boolean; reveal: Reveal; ageMs: number; remainMs?: number; sinceMs: number;
-  speed?: number; real: boolean; only?: 'ground' | 'air';
+  speed?: number; vel?: V2; real: boolean; only?: 'ground' | 'air';
+  /** distance (m) to the nearest own tank respawn point: live red markers are spawn-proximity reveals (压家) */
+  spawnM?: number | null;
 }
+export interface Ping { id: string; only: 'ground' | 'air'; w: V2; area: [V2, V2] | null; grid: string | null; remainMs: number; ttlMs: number; text: string; }
+export interface Call { id: string; only: 'ground' | 'air'; w: V2; text: string; grid: string | null; remainMs: number; ttlMs: number; }
+export interface FeedLine { id: string; text: string; me: boolean; dead: boolean; ageMs: number; }
+export interface Collector { id: string; nick: string; player: string; inBattle: boolean; member: boolean; ageMs: number; lagMs: number | null; delayMs: number | null; hz: number; paused: boolean; replay: boolean; map: string | null; }
+export type Conn = 'demo' | 'connecting' | 'live' | 'idle' | 'offline' | 'auth';
 export interface Snapshot {
   t: number;              // sim ms
   battle: number;         // battle seconds
@@ -26,7 +35,11 @@ export interface Snapshot {
   airfield: [V2, V2] | null;
   bombing: V2[];
   stale: boolean; ageMs: number; latency: number; hz: number;
+  pings: Ping[]; calls: Call[]; feed: FeedLine[];
+  conn: Conn; inBattle: boolean; collectors: Collector[]; viewers: number; room: string; battleId: string | null;
+  rtt: number | null;
 }
+export const EXTRA_EMPTY = { pings: [] as Ping[], calls: [] as Call[], feed: [] as FeedLine[], collectors: [] as Collector[] };
 
 const BATTLE_T0 = 372; // battle clock starts at 06:12
 const start = performance.now();
@@ -131,30 +144,30 @@ function build(t: number): Snapshot {
   const tt = Math.min(tg, GND.dur);
   let sIdx = 0; while (sIdx < gs.length - 1 && gs[sIdx + 1][0] <= tt) sIdx++;
   const so = gs[sIdx];
-  friends.push({ id: 'm1', nick: '朔风', air: false, sidc: SIDC.tank, w: [so[1] * 4096, so[2] * 4096], hdg: so[3] ?? 70, self: true, alive: true, ageMs: jitter(1), real: true, vehicle: '虎 H1' });
+  friends.push({ id: 'm1', nick: '朔风', air: false, sidc: SIDC.tank, w: [so[1] * 4096, so[2] * 4096], hdg: so[3] ?? 70, self: true, alive: true, ageMs: jitter(1), real: true, vehicle: '虎 H1', role: 'self' });
 
   const L = (id: string, nick: string, loop: Loop, phase: number, sidc: string, veh: string) => {
     const p = onLoop(loop, ts, phase);
-    friends.push({ id, nick, air: false, sidc, w: p.w, hdg: p.hdg, self: false, alive: true, ageMs: jitter(id.charCodeAt(1)), real: false, vehicle: veh });
+    friends.push({ id, nick, air: false, sidc, w: p.w, hdg: p.hdg, self: false, alive: true, ageMs: jitter(id.charCodeAt(1)), real: false, vehicle: veh, role: id === 'm2' || id === 'm3' ? 'squad' : 'ally' });
   };
   L('m2', '死神', LOOPS.sishen, 0.1, SIDC.tank, '豹 1');
   L('m3', '铁砧', LOOPS.tiezhen, 0.6, SIDC.tank, 'T-72A');
   L('m4', '夜枭', LOOPS.yexiao, 0.3, SIDC.tank, 'M41A1');
-  friends.push({ id: 'm5', nick: '雷鸣', air: false, sidc: SIDC.spaa, w: [0.405 * 4096, 0.586 * 4096], hdg: (80 + Math.sin(ts / 8) * 25 + 360) % 360, self: false, alive: true, ageMs: jitter(5), real: false, vehicle: '猎豹' });
+  friends.push({ id: 'm5', nick: '雷鸣', air: false, sidc: SIDC.spaa, w: [0.405 * 4096, 0.586 * 4096], hdg: (80 + Math.sin(ts / 8) * 25 + 360) % 360, self: false, alive: true, ageMs: jitter(5), real: false, vehicle: '猎豹' , role: 'ally' });
   // 白桦: dead for 70 s of each 150 s cycle → greyed last known position + age
   {
     const cyc = ts % 150;
     if (cyc < 70) {
-      friends.push({ id: 'm6', nick: '白桦', air: false, sidc: SIDC.tank, w: [0.488 * 4096, 0.598 * 4096], hdg: 95, self: false, alive: false, ageMs: (cyc + 12) * 1000, real: false, vehicle: 'M18' });
+      friends.push({ id: 'm6', nick: '白桦', air: false, sidc: SIDC.tank, w: [0.488 * 4096, 0.598 * 4096], hdg: 95, self: false, alive: false, ageMs: (cyc + 12) * 1000, real: false, vehicle: 'M18' , role: 'ally' });
     } else {
       const p = onLoop(LOOPS.baihua, cyc - 70, 0.33);
-      friends.push({ id: 'm6', nick: '白桦', air: false, sidc: SIDC.tank, w: p.w, hdg: p.hdg, self: false, alive: true, ageMs: jitter(6), real: false, vehicle: 'M18' });
+      friends.push({ id: 'm6', nick: '白桦', air: false, sidc: SIDC.tank, w: p.w, hdg: p.hdg, self: false, alive: true, ageMs: jitter(6), real: false, vehicle: 'M18' , role: 'ally' });
     }
   }
   // 青鸟 — real IA-58 air track
   {
     const a = airSelfAt(t % AIR_PERIOD);
-    friends.push({ id: 'm7', nick: '青鸟', air: true, sidc: SIDC.attack, w: normToCanon('air', a.n), hdg: a.hdg, self: false, alive: true, ageMs: jitter(7), real: a.real, vehicle: 'IA-58A' });
+    friends.push({ id: 'm7', nick: '青鸟', air: true, sidc: SIDC.attack, w: normToCanon('air', a.n), hdg: a.hdg, self: false, alive: true, ageMs: jitter(7), real: a.real, vehicle: 'IA-58A' , role: 'ally' });
   }
   // 孤狼 — synthetic fighter orbit (air norm circle)
   {
@@ -162,7 +175,7 @@ function build(t: number): Snapshot {
     const c: V2 = [0.672, 0.503], r = 0.011;
     const n: V2 = [c[0] + Math.cos(ang) * r, c[1] + Math.sin(ang) * r];
     const hdg = (Math.atan2(-Math.sin(ang), -Math.cos(ang)) * 180 / Math.PI + 360) % 360;
-    friends.push({ id: 'm8', nick: '孤狼', air: true, sidc: SIDC.fighter, w: normToCanon('air', n), hdg, self: false, alive: true, ageMs: jitter(8), real: false, vehicle: 'F-86F' });
+    friends.push({ id: 'm8', nick: '孤狼', air: true, sidc: SIDC.fighter, w: normToCanon('air', n), hdg, self: false, alive: true, ageMs: jitter(8), real: false, vehicle: 'F-86F' , role: 'ally' });
   }
 
   // ---------- contacts ----------
@@ -196,19 +209,6 @@ function build(t: number): Snapshot {
     const s = sampleAt(tr.s, Math.min(ta, AIR.dur));
     push('a' + tr.id, tr.icon, isAir, normToCanon('air', [s[1], s[2]]), s[4], s[3], isAir ? 'air' : (s[3] === 2 ? 'highlight' : 'static'), true, ta - first, undefined, isAir ? undefined : 'air');
   }
-  // synthetic RB-style reveals (parser hypotheses H-A1 scouted 30 s / H-B1 hit-revealed brief, frozen)
-  {
-    const cyc = (t % 50000) / 1000;
-    if (cyc >= 5 && cyc < 35) {
-      const e = cyc - 5;
-      const step = Math.floor(e / 3) * 3; // stepped "periodic" update
-      const w: V2 = [(0.612 - step * 0.00075) * 4096, (0.662 - step * 0.0002) * 4096];
-      push('sc1', 'MediumTank', false, w, null, e < 11 ? 2 : 0, 'scouted', false, e * 1000, (30 - e) * 1000);
-    }
-    if (cyc >= 28 && cyc < 32.5) {
-      push('hit1', 'TankDestroyer', false, [0.585 * 4096, 0.452 * 4096], null, 2, 'hit', false, (cyc - 28) * 1000, (32.5 - cyc) * 1000);
-    }
-  }
   // ghosts
   for (const [id, m] of mem) {
     if (seen.has(id)) continue;
@@ -220,7 +220,8 @@ function build(t: number): Snapshot {
 
   const af = AIR.airfield ? [normToCanon('air', [AIR.airfield[0], AIR.airfield[1]]), normToCanon('air', [AIR.airfield[2], AIR.airfield[3]])] as [V2, V2] : null;
   const bombing = AIR.bombing.filter((b) => (t % AIR_PERIOD) >= b[2]).map((b) => normToCanon('air', [b[0], b[1]]));
-  return { t, battle, friends, contacts, airfield: af, bombing, stale: false, ageMs: 0, latency: 96 + ((Math.sin(t / 2300) + 1) * 18) | 0, hz: 10 };
+  return { t, battle, friends, contacts, airfield: af, bombing, stale: false, ageMs: 0, latency: 96 + ((Math.sin(t / 2300) + 1) * 18) | 0, hz: 10,
+    ...EXTRA_EMPTY, conn: 'demo', inBattle: true, viewers: 1, room: 'DEMO', battleId: 'demo', rtt: null };
 }
 
 function tick() {
@@ -235,7 +236,8 @@ function tick() {
   }
   listeners.forEach((l) => l());
 }
-setInterval(tick, 100);
+let started = false;
+export function startSim() { if (!started) { started = true; setInterval(tick, 100); } }
 
 export const ICON_ZH: Record<string, string> = {
   LightTank: '轻坦', MediumTank: '中坦', HeavyTank: '重坦', TankDestroyer: '坦歼', SPAA: '防空', Wheeled: '轮式',

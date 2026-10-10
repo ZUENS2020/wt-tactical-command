@@ -4,7 +4,7 @@ const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome'
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
 const page = await ctx.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR', e.message));
-await page.goto(BASE + '?fresh=1&mode=ground&ui=member&collab=0', { waitUntil: 'networkidle' });
+await page.goto(BASE + '?demo=1&fresh=1&mode=ground&ui=member&collab=0', { waitUntil: 'networkidle' });
 await page.waitForTimeout(1200);
 const cdp = await ctx.newCDPSession(page);
 const b = await page.locator('.mapview .hit').boundingBox();

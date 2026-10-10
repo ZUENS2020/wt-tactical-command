@@ -24,7 +24,7 @@ async function shot(name, vp, q, fn) {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('PAGEERROR', name, e.message));
   page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', name, m.text()); });
-  await page.goto(BASE + '?fresh=1&' + q, { waitUntil: 'networkidle' });
+  await page.goto(BASE + '?demo=1&fresh=1&' + q, { waitUntil: 'networkidle' });
   await page.waitForTimeout(2600);
   if (fn) await fn(page);
   await check(page, name);

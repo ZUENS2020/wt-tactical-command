@@ -110,7 +110,7 @@ function Editor({ cmd, more, moving }: { cmd: boolean; more: boolean; moving: bo
       <div className="ehead">
         {d.kind === 'point' && <GlyphIcon cat={d.cat!} size={24} />}
         <b>{kindName(d)}</b>
-        <span className="meta">{gridRef('ground', d.pts[0])} · {d.by} · {fmtClock(d.t)}{len ? ` · ${fmtDist(len)}` : ''}</span>
+        <span className="meta">{gridRef(d.scope === 'air' ? 'air' : 'ground', d.pts[0])} · {d.by} · {fmtClock(d.t)}{len ? ` · ${fmtDist(len)}` : ''}</span>
         <button className="x" onClick={() => setState({ selectedId: null, moving: false })} aria-label="关闭">×</button>
       </div>
       <div className="erow nrow">

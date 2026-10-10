@@ -17,6 +17,7 @@ use wtc_common::{now_ms, Batch, Record};
 
 mod guard;
 mod labels;
+mod live;
 mod markers;
 mod naval;
 
@@ -30,6 +31,10 @@ struct App {
     naval_cfg: naval::NavalCfg,
     icon_stats: Mutex<naval::IconStats>,
     guard_cfg: guard::GuardCfg,
+    /// live team view (rooms, battles, drawings); lock order: inner -> hub
+    hub: Mutex<live::Hub>,
+    img_index: Mutex<(i64, HashMap<String, PathBuf>)>,
+    replays: Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 #[derive(Default)]
@@ -288,6 +293,7 @@ impl App {
         }
         records.sort_by_key(|r| r.seq);
         let mut ist = self.icon_stats.lock().unwrap();
+        let mut hub = self.hub.lock().unwrap();
         for mut r in records {
             if r.session != batch.session {
                 foreign += 1;
@@ -336,7 +342,9 @@ impl App {
             }
             live_update(s, &r, now);
             s.markers.feed(&r);
+            hub.feed(&s.id, &s.player, None, &r, now);
         }
+        drop(hub);
         drop(ist);
         if !s.markers.out.is_empty() {
             let mut buf = Vec::new();
@@ -1093,7 +1101,15 @@ async fn main() -> anyhow::Result<()> {
     }
     let guard_cfg = guard::GuardCfg::from_env();
     eprintln!("[{}] clock guard: max skew {} ms, legacy collectors {:?}", fmt_local(now_ms()), guard_cfg.max_skew_ms, guard_cfg.legacy);
+    let hub = live::Hub::from_env(&root);
+    if hub.view_key.len() < 8 {
+        eprintln!("[{}] WARNING: WT_VIEW_TOKEN missing/short: live map (/api/live, /api/map) disabled", fmt_local(now_ms()));
+    }
+    eprintln!("[{}] live: rooms dir {}, default room '{}'", fmt_local(now_ms()), hub.dir.display(), hub.default_room);
     let app = Arc::new(App {
+        hub: Mutex::new(hub),
+        img_index: Mutex::new((0, HashMap::new())),
+        replays: Mutex::new(HashMap::new()),
         guard_cfg,
         naval_cfg,
         icon_stats: Mutex::new(icon_stats),
@@ -1106,6 +1122,7 @@ async fn main() -> anyhow::Result<()> {
     });
     let r = Router::new()
         .route("/", get(index))
+        .route("/status", get(index))
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/status", get(status_json))
         .route("/api/time", get(api_time))
@@ -1116,6 +1133,11 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/labels", get(labels_get))
         .route("/api/markers", get(markers_get))
         .route("/img/{session}/{file}", get(img_get))
+        .route("/api/live", get(live_ws))
+        .route("/api/live/check", get(live_check))
+        .route("/api/map/{file}", get(map_get))
+        .route("/api/replay", post(replay_start))
+        .route("/api/replay/stop", post(replay_stop))
         .layer(DefaultBodyLimit::max(256 * 1024 * 1024))
         .with_state(app.clone());
     {
@@ -1134,6 +1156,24 @@ async fn main() -> anyhow::Result<()> {
                             s.guard_dirty = false;
                         }
                     }
+                }
+            }
+        });
+    }
+    {
+        // live ticker: 10 Hz state broadcast, drawings persisted every 2 s
+        let app = app.clone();
+        tokio::spawn(async move {
+            let mut iv = tokio::time::interval(std::time::Duration::from_millis(100));
+            iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut n = 0u64;
+            loop {
+                iv.tick().await;
+                n += 1;
+                let mut hub = app.hub.lock().unwrap();
+                hub.tick(now_ms());
+                if n % 20 == 0 {
+                    hub.save_all();
                 }
             }
         });
@@ -1157,6 +1197,7 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     write_icon_stats(&app.root, &mut app.icon_stats.lock().unwrap());
+    app.hub.lock().unwrap().save_all();
     Ok(())
 }
 
@@ -1239,4 +1280,282 @@ fn filter_existing(root: &Path, cfg: &naval::NavalCfg, mut stats: naval::IconSta
     write_icon_stats(root, &mut stats);
     println!("unknown icons: {:?}\nunknown types: {:?}", stats.unknown_icons, stats.unknown_types);
     Ok(())
+}
+
+// ------------------------------------------------------------------ live map endpoints
+
+#[derive(Deserialize)]
+struct LiveQ {
+    room: Option<String>,
+    key: Option<String>,
+    nick: Option<String>,
+}
+
+fn room_name(r: Option<&str>, def: &str) -> Option<String> {
+    let r = r.filter(|s| !s.is_empty()).unwrap_or(def);
+    if r.len() <= 32 && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        Some(r.to_string())
+    } else {
+        None
+    }
+}
+
+impl App {
+    fn view_ok(&self, key: Option<&str>, h: &HeaderMap) -> bool {
+        if self.authed(h) {
+            return true;
+        }
+        let hub = self.hub.lock().unwrap();
+        match key {
+            Some(k) => hub.view_key.len() >= 8 && constant_eq(k.as_bytes(), hub.view_key.as_bytes()),
+            None => false,
+        }
+    }
+}
+
+/// GET /api/live/check?key=  -> 200 / 401 (lets the settings sheet validate the room password)
+async fn live_check(State(app): St, h: HeaderMap, Query(q): Query<LiveQ>) -> Response {
+    if !app.view_ok(q.key.as_deref(), &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad room password");
+    }
+    let def = app.hub.lock().unwrap().default_room.clone();
+    Json(serde_json::json!({"ok": true, "default_room": def})).into_response()
+}
+
+/// GET /api/live?room=<name>&key=<room password>  (WebSocket)
+async fn live_ws(State(app): St, h: HeaderMap, Query(q): Query<LiveQ>, ws: axum::extract::ws::WebSocketUpgrade) -> Response {
+    if !app.view_ok(q.key.as_deref(), &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad room password");
+    }
+    let def = app.hub.lock().unwrap().default_room.clone();
+    let Some(room) = room_name(q.room.as_deref(), &def) else { return err(StatusCode::BAD_REQUEST, "bad room") };
+    let nick: String = q.nick.unwrap_or_default().chars().take(24).collect();
+    ws.max_message_size(1 << 20).on_upgrade(move |sock| live_session(app, room, nick, sock))
+}
+
+async fn live_session(app: Arc<App>, room: String, nick: String, sock: axum::extract::ws::WebSocket) {
+    use axum::extract::ws::Message;
+    use futures_util::{SinkExt, StreamExt};
+    let client = format!("c{:x}", rand::random::<u32>());
+    let (mut rx, hello) = {
+        let mut hub = app.hub.lock().unwrap();
+        let r = hub.room(&room);
+        (r.tx.subscribe(), r.hello(now_ms()))
+    };
+    let (mut tx_ws, mut rx_ws) = sock.split();
+    let hello = format!("{{\"you\":\"{client}\",{}", &hello[1..]);
+    if tx_ws.send(Message::Text(hello.into())).await.is_err() {
+        return;
+    }
+    eprintln!("[{}] live: viewer {client} ({nick}) joined room {room}", fmt_local(now_ms()));
+    let mut last_battle: Option<String> = None;
+    loop {
+        tokio::select! {
+            m = rx.recv() => match m {
+                Ok(s) => {
+                    // on battle change, resend the drawing set of the new battle
+                    if s.starts_with("{\"t\":") {
+                        if let Some(i) = s.find("\"battle\":") {
+                            let b: String = s[i + 9..].chars().take_while(|c| *c != ',').collect();
+                            if last_battle.as_deref() != Some(b.as_str()) {
+                                if last_battle.is_some() {
+                                    let h = { let mut hub = app.hub.lock().unwrap(); hub.room(&room).hello(now_ms()) };
+                                    if tx_ws.send(Message::Text(h.into())).await.is_err() { break; }
+                                }
+                                last_battle = Some(b);
+                            }
+                        }
+                    }
+                    if tx_ws.send(Message::Text(s.to_string().into())).await.is_err() { break; }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            },
+            m = rx_ws.next() => match m {
+                Some(Ok(Message::Text(t))) => {
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(t.as_str()) else { continue };
+                    match v["op"].as_str() {
+                        Some("ping") => {
+                            let r = serde_json::json!({"type": "pong", "c": v["c"], "server_ms": now_ms()}).to_string();
+                            if tx_ws.send(Message::Text(r.into())).await.is_err() { break; }
+                        }
+                        Some("put") | Some("del") => {
+                            let res = { app.hub.lock().unwrap().draw_op(&room, &v, &client, now_ms()) };
+                            if let Err(e) = res {
+                                let r = serde_json::json!({"type": "error", "error": e, "op": v["op"], "id": v["id"].as_str().or(v["d"]["id"].as_str())}).to_string();
+                                if tx_ws.send(Message::Text(r.into())).await.is_err() { break; }
+                                if e == "battle_changed" {
+                                    let h = { let mut hub = app.hub.lock().unwrap(); hub.room(&room).hello(now_ms()) };
+                                    if tx_ws.send(Message::Text(h.into())).await.is_err() { break; }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
+                _ => {}
+            },
+        }
+    }
+    eprintln!("[{}] live: viewer {client} left room {room}", fmt_local(now_ms()));
+}
+
+#[derive(Deserialize)]
+struct KeyQ {
+    key: Option<String>,
+}
+
+/// GET /api/map/<sha256>[.ext]?key=<room password>  -> map image bytes (immutable)
+async fn map_get(State(app): St, h: HeaderMap, AxPath(file): AxPath<String>, Query(q): Query<KeyQ>) -> Response {
+    if !app.view_ok(q.key.as_deref(), &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad room password");
+    }
+    let hash = file.split('.').next().unwrap_or("").to_ascii_lowercase();
+    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let app2 = app.clone();
+    let r = tokio::task::spawn_blocking(move || -> Option<Vec<u8>> {
+        let lookup = |idx: &HashMap<String, PathBuf>| idx.get(&hash).cloned();
+        let mut p = lookup(&app2.img_index.lock().unwrap().1);
+        if p.is_none() {
+            let dirs: Vec<PathBuf> = app2.inner.lock().unwrap().known_dirs.values().cloned().collect();
+            let mut ix = app2.img_index.lock().unwrap();
+            if now_ms() - ix.0 > 1500 {
+                ix.0 = now_ms();
+                for d in dirs {
+                    if let Ok(rd) = std::fs::read_dir(d.join("images")) {
+                        for e in rd.flatten() {
+                            if let Some(stem) = e.path().file_stem().and_then(|s| s.to_str()) {
+                                ix.1.insert(stem.to_ascii_lowercase(), e.path());
+                            }
+                        }
+                    }
+                }
+            }
+            p = lookup(&ix.1);
+        }
+        std::fs::read(p?).ok()
+    })
+    .await;
+    match r {
+        Ok(Some(b)) => {
+            let ct = match wtc_common::sniff_image(&b) {
+                "png" => "image/png",
+                "jpg" => "image/jpeg",
+                "webp" => "image/webp",
+                _ => "application/octet-stream",
+            };
+            ([(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "private, max-age=31536000, immutable")], b).into_response()
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, [(header::CACHE_CONTROL, "no-store")], "not uploaded yet").into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct ReplayReq {
+    session: String,
+    room: Option<String>,
+    speed: Option<f64>,
+    /// server ms window of the original recording
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+    /// compress gaps > 5 s (hangar / loading) to 1.5 s (default true)
+    skip_idle: Option<bool>,
+}
+
+/// POST /api/replay (upload token): replay a recorded session from disk into the LIVE pipeline of a room
+/// (pseudo-collector "replay:<session>"; nothing is written to the data dir).
+async fn replay_start(State(app): St, h: HeaderMap, Json(q): Json<ReplayReq>) -> Response {
+    if !app.authed(&h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    let Some(room) = room_name(Some(q.room.as_deref().unwrap_or("test")), "test") else { return err(StatusCode::BAD_REQUEST, "bad room") };
+    let dirs = app.select_dirs(Some(&q.session), None);
+    let Some((sid, dir)) = dirs.into_iter().next() else { return err(StatusCode::NOT_FOUND, "no such session") };
+    let speed = q.speed.unwrap_or(1.0).clamp(0.1, 20.0);
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let key = format!("replay:{sid}");
+    if let Some(old) = app.replays.lock().unwrap().insert(key.clone(), stop.clone()) {
+        old.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    let player = std::fs::read(dir.join("session.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|v| v["player"].as_str().map(|s| s.to_string())).unwrap_or_default();
+    let (from, to, skip) = (q.from_ms.unwrap_or(i64::MIN), q.to_ms.unwrap_or(i64::MAX), q.skip_idle.unwrap_or(true));
+    let app2 = app.clone();
+    let key2 = key.clone();
+    let room2 = room.clone();
+    tokio::spawn(async move {
+        let recs = match tokio::task::spawn_blocking(move || wtc_common::read_session(&dir)).await {
+            Ok(Ok(r)) => r,
+            _ => return,
+        };
+        let ts = |r: &Record| r.ts_server_ms.unwrap_or(r.wall_ms);
+        let recs: Vec<Record> = recs.into_iter().filter(|r| ts(r) >= from && ts(r) <= to && r.ep != "#label").collect();
+        eprintln!("[{}] replay {key2} -> room {room2}: {} records, speed {speed}", fmt_local(now_ms()), recs.len());
+        app2.hub.lock().unwrap().remove_col(&key2);
+        let start = now_ms();
+        let mut virt = 0f64; // replay-time ms elapsed (after idle compression)
+        let mut prev = recs.first().map(ts).unwrap_or(0);
+        let mut epoch_base: Option<u32> = None;
+        let mut i = 0;
+        while i < recs.len() {
+            if stop.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            let now = now_ms();
+            let gap0 = (ts(&recs[i]) - prev).max(0) as f64;
+            let next_virt = virt + if skip && gap0 > 5000.0 { 1500.0 } else { gap0 };
+            let due = start + (next_virt / speed) as i64;
+            if due > now {
+                tokio::time::sleep(std::time::Duration::from_millis(((due - now) as u64).min(100))).await;
+                continue;
+            }
+            let mut hub = app2.hub.lock().unwrap();
+            let mut n = 0;
+            while i < recs.len() && n < 400 {
+                let r0 = &recs[i];
+                let gap = (ts(r0) - prev).max(0) as f64;
+                let step = if skip && gap > 5000.0 { 1500.0 } else { gap };
+                if start + ((virt + step) / speed) as i64 > now_ms() {
+                    break;
+                }
+                virt += step;
+                prev = ts(r0);
+                let mut r = r0.clone();
+                let t = now_ms();
+                r.ts_server_ms = Some(t);
+                r.wall_ms = t;
+                r.recv_ms = Some(t + 120);
+                let eb = *epoch_base.get_or_insert(r.epoch);
+                r.epoch = r.epoch.saturating_sub(eb) + 1 + ((start / 1000) % 1_000_000) as u32; // fresh battle per replay run
+                hub.feed(&key2, &player, Some(&room2), &r, t);
+                i += 1;
+                n += 1;
+            }
+        }
+        eprintln!("[{}] replay {key2} finished ({i} records)", fmt_local(now_ms()));
+        app2.replays.lock().unwrap().remove(&key2);
+    });
+    Json(serde_json::json!({"ok": true, "replay": key, "room": room, "speed": speed})).into_response()
+}
+
+#[derive(Deserialize)]
+struct ReplayStopReq {
+    session: Option<String>,
+}
+
+async fn replay_stop(State(app): St, h: HeaderMap, Json(q): Json<ReplayStopReq>) -> Response {
+    if !app.authed(&h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    let mut n = 0;
+    for (k, f) in app.replays.lock().unwrap().iter() {
+        if q.session.as_deref().map(|s| k.contains(s)).unwrap_or(true) {
+            f.store(true, std::sync::atomic::Ordering::SeqCst);
+            n += 1;
+        }
+    }
+    Json(serde_json::json!({"stopped": n})).into_response()
 }

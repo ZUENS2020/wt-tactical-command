@@ -4,7 +4,7 @@ const BASE = process.argv[2] || 'http://127.0.0.1:4180/';
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
 for (const vp of [[320, 568], [390, 844], [844, 390], [568, 320], [1536, 698]]) for (const ui of ['command', 'member']) {
   const p = await b.newPage({ viewport: { width: vp[0], height: vp[1] } });
-  await p.goto(BASE + `?fresh=1&ui=${ui}&collab=0`); await p.waitForTimeout(700);
+  await p.goto(BASE + `?demo=1&fresh=1&ui=${ui}&collab=0`); await p.waitForTimeout(700);
   const out = [];
   for (const t of ['select', 'point', 'route', 'area', 'source', 'ruler', 'layers']) {
     await p.click(`[data-tool=${t}]`);

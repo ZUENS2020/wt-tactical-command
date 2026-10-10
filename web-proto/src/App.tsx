@@ -7,12 +7,15 @@ import ToolPanel from './ToolPanel';
 import Sheet from './Sheet';
 import { cancelDraft, finishDraft, undoPoint, undo, selectTool, deleteDrawing } from './actions';
 import type { Tool } from './store';
+import { MAPS } from './geo';
 
 export default function App() {
   const { W, H } = useViewport();
   const mode = useStore((s) => s.mode);
   const density = useStore((s) => s.density);
   const toasts = useStore((s) => s.toasts);
+  useStore((s) => s.mapRev);
+  const mk = (m: 'ground' | 'air') => `${m}-${MAPS[m].hash ?? 'none'}-${MAPS[m].min.join(',')}-${MAPS[m].max.join(',')}`;
   const L = computeLayout(W, H, mode, density);
 
   useEffect(() => {
@@ -40,13 +43,13 @@ export default function App() {
       <main className={`main ${L.kind}`} style={{ height: mainH, padding: L.pad / 2, gap: L.gap }} data-layout={L.kind}>
         {single ? (
           <>
-            <MapView key={mode} map={mode as 'ground' | 'air'} size={L.S} interactive dual={false} />
+            <MapView key={mk(mode as 'ground' | 'air')} map={mode as 'ground' | 'air'} size={L.S} interactive dual={false} feed />
             <ToolPanel orient={L.kind === 'side' ? 'side' : 'bottom'} w={L.panelW} h={L.panelH} />
           </>
         ) : (
           <>
-            <MapView key="dg" map="ground" size={L.S} interactive={false} dual />
-            <MapView key="da" map="air" size={L.S} interactive={false} dual />
+            <MapView key={'d' + mk('ground')} map="ground" size={L.S} interactive={false} dual feed />
+            <MapView key={'d' + mk('air')} map="air" size={L.S} interactive={false} dual />
           </>
         )}
       </main>

@@ -4,7 +4,7 @@ const BASE = process.argv[2] || 'http://127.0.0.1:4180/';
 const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox'] });
 const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
 p.on('pageerror', (e) => console.log('PAGEERROR', e.message));
-await p.goto(BASE + '?fresh=1&collab=0'); await p.waitForTimeout(900);
+await p.goto(BASE + '?demo=1&fresh=1&collab=0'); await p.waitForTimeout(900);
 const st = () => p.evaluate(() => new Promise((r) => setTimeout(() => r(JSON.parse(localStorage.getItem('wt-tactical-proto-v1')).drawings), 400)));
 const bb = await p.locator('.mapview .hit').boundingBox();
 const at = (fx, fy) => p.mouse.click(bb.x + bb.width * fx, bb.y + bb.height * fy);

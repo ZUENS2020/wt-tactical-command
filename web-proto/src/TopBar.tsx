@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { getState, setState, useStore } from './store';
 import { setMode } from './actions';
-import { getSnapshot, onSnapshot } from './sim';
+import { getSnapshot, onSnapshot } from './data';
 
-export const POLICY_SHORT = { off: '关', team_visible: '可见', fused: '融合' } as const;
+export const POLICY_SHORT = { off: '关', team_visible: '实时', fused: '残影' } as const;
 
 export function useFresh() {
   const [v, setV] = useState(() => getSnapshot());
@@ -22,7 +22,9 @@ export default function TopBar({ h, W }: { h: number; W: number }) {
   const narrow = W < 520;
   const xn = W < 430;
   const tiny = W < 360;
-  const stale = snap.stale;
+  const stale = snap.stale && snap.conn !== 'idle';
+  const CONN_TXT: Record<string, string> = { connecting: '连接中', offline: '离线', auth: '需密码', idle: '机库' };
+  const special = CONN_TXT[snap.conn];
   return (
     <header className="topbar" style={{ height: h }}>
       <div className="brand" title="WT Tactical">
@@ -40,9 +42,9 @@ export default function TopBar({ h, W }: { h: number; W: number }) {
         ))}
       </div>
       <span className="grow" />
-      <button className={'conn' + (stale ? ' stale' : '')} onClick={() => setState({ sheet: getState().sheet ? null : 'settings' })} title="连接与敌情策略" aria-label="连接与设置">
+      <button className={'conn' + (stale || snap.conn === 'offline' || snap.conn === 'auth' ? ' stale' : '') + (snap.conn === 'idle' ? ' idle' : '')} onClick={() => setState({ sheet: getState().sheet ? null : 'settings' })} title="连接与敌情策略" aria-label="连接与设置">
         <i className="dot" />
-        {(!tiny || stale) && <span className="ctext">{stale ? (tiny ? `${(snap.ageMs / 1000).toFixed(1)}s` : `陈旧 ${(snap.ageMs / 1000).toFixed(1)}s`) : narrow ? `${snap.latency}ms` : `${snap.hz}Hz · ${snap.latency}ms`}</span>}
+        {(!tiny || stale || special) && <span className="ctext">{special && snap.conn !== 'idle' ? special : snap.conn === 'idle' ? (narrow ? '机库' : `机库 · ${snap.rtt ?? '-'}ms`) : stale ? (tiny ? `${(snap.ageMs / 1000).toFixed(1)}s` : `陈旧 ${(snap.ageMs / 1000).toFixed(1)}s`) : narrow ? `${snap.latency}ms` : `${snap.hz}Hz · ${snap.latency}ms`}</span>}
         <span className={'pol ' + policy} title={`敌情策略：${policy}`}>{narrow ? POLICY_SHORT[policy][0] : '敌情 ' + POLICY_SHORT[policy]}</span>
       </button>
     </header>

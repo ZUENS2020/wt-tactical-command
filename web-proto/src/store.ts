@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { MapId, V2 } from './geo';
+import { DEMO } from './mode';
 
 export type ViewMode = 'ground' | 'air' | 'dual';
 export type Density = 'command' | 'member';
@@ -26,7 +27,8 @@ export interface Drawing {
   showTime: boolean;
   by: string;
   scope: Scope;
-  v: number;                 // server version (mock)
+  v: number;                 // local edit counter
+  sv?: number;               // server receive time of the last write (live)
 }
 
 export interface ViewState { cx: number; cy: number; z: number; }
@@ -63,9 +65,11 @@ export interface State {
   toasts: Toast[];
   undo: { kind: 'add' | 'del' | 'upd'; before?: Drawing; after?: Drawing }[];
   showMore: boolean;
+  /** bumps whenever live map metadata (image / grid) changes */
+  mapRev: number;
 }
 
-const LS_KEY = 'wt-tactical-proto-v1';
+const LS_KEY = DEMO ? 'wt-tactical-proto-v1' : 'wt-tactical-live-v1';
 
 function initial(): State {
   const base: State = {
@@ -76,17 +80,17 @@ function initial(): State {
     views: { ground: null, air: null },
     policy: 'team_visible',
     layers: { grid: true, friendly: true, enemy: true, drawings: true, time: true, labels: true, lockDrawings: false },
-    collab: true, sheet: null, toasts: [], undo: [], showMore: false,
+    collab: true, sheet: null, toasts: [], undo: [], showMore: false, mapRev: 0,
   };
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const p = JSON.parse(raw);
       Object.assign(base, {
-        drawings: p.drawings ?? base.drawings, density: p.density ?? base.density,
+        drawings: DEMO ? (p.drawings ?? base.drawings) : [], density: p.density ?? base.density,
         mode: p.mode ?? base.mode, lastSingle: p.lastSingle ?? base.lastSingle,
         policy: p.policy ?? base.policy, layers: { ...base.layers, ...(p.layers ?? {}) },
-        collab: p.collab ?? true, views: p.views ?? base.views,
+        collab: DEMO ? (p.collab ?? true) : false, views: p.views ?? base.views,
       });
     }
   } catch { /* ignore */ }
@@ -112,7 +116,7 @@ export function setState(patch: Partial<State> | ((s: State) => Partial<State>))
   saveTimer = window.setTimeout(() => {
     try {
       localStorage.setItem(LS_KEY, JSON.stringify({
-        drawings: state.drawings, density: state.density, mode: state.mode, lastSingle: state.lastSingle,
+        drawings: DEMO ? state.drawings : [], density: state.density, mode: state.mode, lastSingle: state.lastSingle,
         policy: state.policy, layers: state.layers, collab: state.collab, views: state.views,
       }));
     } catch { /* ignore */ }
