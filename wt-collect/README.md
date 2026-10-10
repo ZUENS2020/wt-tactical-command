@@ -56,6 +56,18 @@ All ship/naval info is removed in the receiver ingest path before writing (recei
   Counters per session in guard.json, /api/status `clock_guard`, status page, analyzer report. Stored records get recv_ms.
 - Test: test/clock-test.sh <label> <faketime skew> <linux|wine> (outage + 3.6 s link delay via mock/delayproxy.py --delay-file).
 
+## 1.0.0: product desktop client "WT 战术指挥" (no labeling UI)
+
+- GUI has no label buttons / note input / undo / label counters anymore. The label code path (collector `labels.rs`,
+  hidden CLI `label`/`labels` subcommands, uploader task) stays; the receiver keeps accepting `/api/label`.
+- Layout: title "WT 战术指挥 v1.0.0", status summary line, big 打开战术地图 button (`[gui] map_url`, default https://wt.zuens2020.top/), compact status
+  (游戏连接 / 对局中·陆战/空战 or 机库待命 / 上传 正常·延迟 / 时钟同步 / 玩家 nickname + ID), 开机自启, 窗口置顶,
+  隐藏到托盘, 退出; technical numbers + log behind a collapsed 详情 expander. Content scrolls if the window is small.
+- Defaults: `[gui] on_close = "tray"`, `always_on_top = false`, new optional `[gui] nickname`; the package toml has no
+  `[[labels]]` (old toml files with `[[labels]]` / `columns` still parse). Start hidden in the tray only via autostart (`gui --tray`).
+- Package `dist/wt-collector-win64.zip` (1.0.0, end-user README), previous `dist/wt-collector-win64-0.2.2.zip`;
+  screenshot `shots/gui-1.0.png` (Wine, synthetic mock8111 + local receiver).
+
 ## 0.2.2: uniform pings + finished desktop client
 
 - Pings are not distinguished by owner. Collector default buttons = original 9 + one `ping` (标点), replacing the 4 buttons of 0.2.1.

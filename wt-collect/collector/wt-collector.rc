@@ -1,18 +1,18 @@
 #pragma code_page(65001)
 1 ICON "assets/wt-collector.ico"
 1 VERSIONINFO
-FILEVERSION 0,2,2,0
-PRODUCTVERSION 0,2,2,0
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
     BLOCK "080404b0"
     BEGIN
       VALUE "CompanyName", "WT Tactical Command"
-      VALUE "FileDescription", "WT 数据采集 · 战术指挥客户端"
-      VALUE "FileVersion", "0.2.2"
-      VALUE "ProductName", "wt-collector"
-      VALUE "ProductVersion", "0.2.2"
+      VALUE "FileDescription", "WT 战术指挥"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "ProductName", "WT 战术指挥"
+      VALUE "ProductVersion", "1.0.0"
       VALUE "OriginalFilename", "wt-collector.exe"
     END
   END

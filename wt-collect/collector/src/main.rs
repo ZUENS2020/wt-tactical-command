@@ -150,7 +150,7 @@ struct FileCfg {
     gui: Option<GuiCfg>,
 }
 
-pub const DEFAULT_MAP_URL: &str = "https://wt.zuens2020.top/proto/";
+pub const DEFAULT_MAP_URL: &str = "https://wt.zuens2020.top/";
 
 /// `[gui]` section of wt-collector.toml
 #[derive(Deserialize, Debug, Clone)]
@@ -158,20 +158,23 @@ pub const DEFAULT_MAP_URL: &str = "https://wt.zuens2020.top/proto/";
 pub struct GuiCfg {
     /// window stays above other windows (toggle in the window)
     pub always_on_top: bool,
-    /// close button: "ask" (default) | "tray" (hide to the system tray) | "minimize" | "exit"
+    /// close button: "tray" (default: hide to the system tray, keep collecting) | "ask" | "minimize" | "exit"
     pub on_close: String,
     /// font file with Chinese glyphs (default: Microsoft YaHei / SimHei / SimSun from C:\Windows\Fonts)
     pub font: Option<String>,
     /// UI scale (1.0 = 100 %)
     pub scale: f32,
-    /// buttons per row
+    /// (0.2.x label-button grid; unused since 1.0.0, kept so old toml files still parse)
+    #[allow(dead_code)]
     pub columns: usize,
+    /// in-game nickname shown in the window (optional; the player id is always shown)
+    pub nickname: Option<String>,
     /// web tactical map opened by the "打开战术地图" button (http/https only)
     pub map_url: String,
 }
 impl Default for GuiCfg {
     fn default() -> Self {
-        GuiCfg { always_on_top: true, on_close: "ask".into(), font: None, scale: 1.0, columns: 2, map_url: DEFAULT_MAP_URL.into() }
+        GuiCfg { always_on_top: false, on_close: "tray".into(), font: None, scale: 1.0, columns: 2, map_url: DEFAULT_MAP_URL.into(), nickname: None }
     }
 }
 #[derive(Deserialize, Default, Debug)]
@@ -1655,7 +1658,9 @@ mod gui_cfg_tests {
         let fc: FileCfg = toml::from_str(include_str!("../../dist/pkg/wt-collector.tmpl.toml")).unwrap();
         let g = fc.gui.unwrap();
         assert_eq!(g.map_url, DEFAULT_MAP_URL);
-        assert_eq!(g.on_close, "ask");
+        assert_eq!(g.on_close, "tray");
+        assert!(!g.always_on_top);
+        assert!(fc.labels.is_none(), "1.0 package toml has no [[labels]]");
         // missing map_url -> default
         let g2: GuiCfg = toml::from_str("columns = 3").unwrap();
         assert_eq!(g2.map_url, DEFAULT_MAP_URL);

@@ -1,16 +1,11 @@
-# wt-collector 配置（与 exe 放在同一文件夹）。命令行参数优先于这里的设置。
+# WT 战术指挥 配置文件（与 wt-collector.exe 放在同一文件夹）。一般不需要修改。
 server = "{SERVER}"
 token = "CHANGE_ME_WT_TOKEN"
-# 测试者名称（会出现在会话 ID 和状态页上）
+# 玩家 ID（显示在窗口里和战术地图上）
 player = "shengyuan"
 
-# 游戏网页接口：新版客户端可能在 9222 端口（旧版 8111）。"auto" = 依次探测 8111、9222
-# （127.0.0.1 优先，然后本机局域网 IP），失败后自动重新探测。也可写死，例如 game_port = 9222
+# 游戏网页接口端口："auto" = 自动查找（8111 / 9222）。一般不用改。
 game_port = "auto"
-# game_host = "127.0.0.1"   # 只允许 127.0.0.1 或本机自己的局域网 IP
-
-# 快组采样率预设（map_obj / indicators / state），可选 2 / 5 / 10 / 20
-# rate = 10
 
 [rates]
 map_obj = 10
@@ -22,65 +17,10 @@ hudmsg = 2
 gamechat = 2
 map_img_check_s = 5
 
-# ---------------------------------------------------------------- 0.2.0 窗口 / 标注按钮
 [gui]
-always_on_top = true     # 窗口置顶（窗口里也可以切换，会记住）
-on_close = "ask"         # 点关闭按钮时："ask" 询问 / "tray" 隐藏到托盘继续采集 / "minimize" 最小化继续采集 / "exit" 直接退出
-columns = 2              # 每行按钮数
+map_url = "https://wt.zuens2020.top/"   # “打开战术地图”打开的网页
+on_close = "tray"        # 点窗口右上角 ×："tray" 隐藏到托盘继续运行 / "ask" 询问 / "exit" 直接退出
+always_on_top = false    # 窗口置顶（窗口里也可以切换，会记住）
 scale = 1.0              # 界面缩放，例如 1.25
-map_url = "https://wt.zuens2020.top/proto/"   # “打开战术地图”按钮打开的网页（只支持 http/https）
-# font = "C:\\Windows\\Fonts\\msyh.ttc"   # 中文字体（默认自动找 微软雅黑 / 黑体 / 宋体）
-
-# 标注按钮（显示顺序 = 书写顺序）。id 是分析用的英文标识，text 是按钮文字，color 可省略，
-# note = true 表示点击后输入文字。删除全部 [[labels]] 则使用内置默认（与下面相同）。
-[[labels]]
-id = "i_scouted"
-text = "我侦察到敌人"
-color = "#2e7d32"
-
-[[labels]]
-id = "team_scouted"
-text = "队友侦察"
-color = "#00838f"
-
-[[labels]]
-id = "i_hit"
-text = "我击中敌人"
-color = "#ef6c00"
-
-[[labels]]
-id = "got_hit"
-text = "我被击中"
-color = "#c62828"
-
-[[labels]]
-id = "i_spotted"
-text = "我被侦察"
-color = "#ad1457"
-
-[[labels]]
-id = "enemy_icon"
-text = "敌机/敌人出现在地图上"
-color = "#6a1b9a"
-
-[[labels]]
-id = "kill"
-text = "击毁"
-color = "#37474f"
-
-[[labels]]
-id = "died"
-text = "阵亡"
-color = "#212121"
-
-# 0.2.2：地图标点（不区分谁打的）
-[[labels]]
-id = "ping"
-text = "标点"
-color = "#f9a825"
-
-[[labels]]
-id = "note"
-text = "自定义备注"
-color = "#455a64"
-note = true
+nickname = "传奇耐摔王无声铃鹿"   # 在窗口里显示的游戏昵称（可选）
+# font = "C:\\Windows\\Fonts\\msyh.ttc"   # 中文字体（默认自动使用微软雅黑）

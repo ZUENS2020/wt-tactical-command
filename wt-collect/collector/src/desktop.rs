@@ -272,7 +272,7 @@ impl Tray {
             menu.append(i).map_err(|e| e.to_string())?;
         }
         menu.append(&PredefinedMenuItem::separator()).map_err(|e| e.to_string())?;
-        menu.append(&MenuItem::with_id("exit", "退出采集", true, None)).map_err(|e| e.to_string())?;
+        menu.append(&MenuItem::with_id("exit", "退出", true, None)).map_err(|e| e.to_string())?;
         let icon = tray_icon::Icon::from_rgba(ICON32.to_vec(), 32, 32).map_err(|e| e.to_string())?;
         let on_cmd = std::sync::Arc::new(on_cmd);
         let f1 = on_cmd.clone();
@@ -295,7 +295,7 @@ impl Tray {
         let icon = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_menu_on_left_click(false)
-            .with_tooltip("WT 数据采集")
+            .with_tooltip("WT 战术指挥")
             .with_icon(icon)
             .build()
             .map_err(|e| e.to_string())?;
