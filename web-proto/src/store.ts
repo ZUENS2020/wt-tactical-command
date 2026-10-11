@@ -59,7 +59,7 @@ export interface State {
   hover: { map: MapId; w: V2 } | null;
   views: Record<MapId, ViewState | null>;
   policy: EnemyPolicy;
-  layers: { grid: boolean; friendly: boolean; enemy: boolean; drawings: boolean; time: boolean; labels: boolean; lockDrawings: boolean };
+  layers: { grid: boolean; friendly: boolean; spawns: boolean; enemy: boolean; drawings: boolean; time: boolean; labels: boolean; lockDrawings: boolean };
   collab: boolean;
   sheet: null | 'settings';
   toasts: Toast[];
@@ -79,7 +79,7 @@ function initial(): State {
     drawings: [], selectedId: null, moving: false, draft: null, ruler: null, rulerSpeed: 30, hover: null,
     views: { ground: null, air: null },
     policy: 'team_visible',
-    layers: { grid: true, friendly: true, enemy: true, drawings: true, time: true, labels: true, lockDrawings: false },
+    layers: { grid: true, friendly: true, spawns: true, enemy: true, drawings: true, time: true, labels: true, lockDrawings: false },
     collab: true, sheet: null, toasts: [], undo: [], showMore: false, mapRev: 0,
   };
   try {

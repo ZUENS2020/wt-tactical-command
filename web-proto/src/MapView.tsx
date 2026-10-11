@@ -330,6 +330,12 @@ function hitTest(ds: Drawing[], map: MapId, p: V2, wToS: (w: V2) => V2, visible:
   return (best as { id: string } | null)?.id ?? null;
 }
 
+// ---------- symbol scale ----------
+// v2: symbols ~60 % of v1 at the default zoom, growing gently with zoom (≈95 % at 5×) so they stay readable without covering the map.
+export function symK(z: number) { return Math.max(0.6, Math.min(1, 0.6 * Math.pow(Math.max(1, z), 0.3))); }
+/** text shrinks less than symbols */
+export function txtK(z: number) { return Math.max(0.8, Math.min(1, 0.8 * Math.pow(Math.max(1, z), 0.15))); }
+
 // ---------- SVG drawings ----------
 function areaColor(t?: string) { return t === 'recon' ? C.recon : t === 'warning' ? C.enemy : C.order; }
 
@@ -343,9 +349,11 @@ function DrawingsSvg(props: {
   const bt = battleTime();
   const s = getState();
   const ov = !separateMaps() && gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * view.z < 240;
-  const fs = compact ? 10 : S >= 600 ? 12 : 11;
-  const hw = ov ? 3.5 : compact ? 6 : S >= 600 ? 9 : 7.5;
-  const gs = ov ? 0.5 : compact ? 0.82 : S >= 600 ? 1.12 : 1;
+  const sk = symK(view.z), tk = txtK(view.z);
+  const fs = Math.max(8, Math.round((compact ? 10 : S >= 600 ? 12 : 11) * tk));
+  const hw = (ov ? 3.5 : compact ? 6 : S >= 600 ? 9 : 7.5) * sk;
+  const gs = (ov ? 0.5 : compact ? 0.82 : S >= 600 ? 1.12 : 1) * sk;
+  const po = (compact ? 22 : 26) * sk + 2;  // point label offset
   const items = useMemo(() => drawings.filter((d) => d.scope === 'both' || d.scope === map), [drawings, map]);
   const text = (x: number, y: number, t: string, col: string, anchor: 'start' | 'middle' | 'end' = 'middle', size = fs, weight = 600) => (
     <text x={x} y={y} textAnchor={anchor} fontSize={size} fontWeight={weight} fill={col} className="halo">{t}</text>
@@ -366,10 +374,10 @@ function DrawingsSvg(props: {
       const fade = d.cat === 'enemy' ? Math.max(0.38, 1 - Math.max(0, age - 30) / 240) : 1;
       els.push(
         <g key={key} transform={`translate(${x.toFixed(1)} ${y.toFixed(1)})`} opacity={fade}>
-          {sel && <circle r={20} fill="rgba(30,34,28,0.08)" stroke={C.ink} strokeWidth={1.4} strokeDasharray="3 3" />}
+          {sel && <circle r={20 * gs + 2} fill="rgba(30,34,28,0.08)" stroke={C.ink} strokeWidth={1.4} strokeDasharray="3 3" />}
           <PointGlyph cat={d.cat!} status={d.status} s={gs} />
-          {showLabels && d.label && text(0, compact ? 22 : 26, d.label, C.ink)}
-          {timeTxt && !ov && text(0, (d.label && showLabels ? (compact ? 33 : 38) : (compact ? 22 : 26)), timeTxt + (age > 120 ? ' · 陈旧' : ''), d.cat === 'enemy' ? C.enemy : C.ink, 'middle', fs - 1, 600)}
+          {showLabels && d.label && text(0, po, d.label, C.ink)}
+          {timeTxt && !ov && text(0, (d.label && showLabels ? po + fs + 1 : po), timeTxt + (age > 120 ? ' · 陈旧' : ''), d.cat === 'enemy' ? C.enemy : C.ink, 'middle', fs - 1, 600)}
         </g>,
       );
     } else if (d.kind === 'route' || d.kind === 'phase' || d.kind === 'arrow') {
@@ -378,25 +386,25 @@ function DrawingsSvg(props: {
         const dd = attackArrowD(Q, hw);
         els.push(<g key={key}>
           {sel && <path d={dd} fill="none" stroke={C.ink} strokeWidth={5} strokeOpacity={0.25} strokeLinejoin="round" />}
-          <path d={dd} fill={C.order} fillOpacity={0.18} stroke={C.order} strokeWidth={2} strokeDasharray={dash} strokeLinejoin="round" />
+          <path d={dd} fill={C.order} fillOpacity={0.18} stroke={C.order} strokeWidth={1.6} strokeDasharray={dash} strokeLinejoin="round" />
           {showLabels && d.label && (() => { const m = Q[Math.floor(Q.length / 2)]; return text(m[0], m[1] - hw - 6, d.label, C.order, 'middle', fs, 700); })()}
           {sel && P.map((p, i) => <rect key={i} x={p[0] - 3.5} y={p[1] - 3.5} width={7} height={7} fill="#fff" stroke={C.ink} strokeWidth={1.2} />)}
         </g>);
       } else if (d.kind === 'route') {
-        const body = trimEnd(Q, 6);
+        const body = trimEnd(Q, 6 * sk);
         els.push(<g key={key}>
-          <path d={polyD(body)} fill="none" stroke={C.halo} strokeWidth={sel ? 8 : 5.5} strokeLinejoin="round" strokeLinecap="round" />
-          {sel && <path d={polyD(body)} fill="none" stroke={C.ink} strokeOpacity={0.25} strokeWidth={8} strokeLinejoin="round" />}
-          <path d={polyD(body)} fill="none" stroke={C.order} strokeWidth={2.6} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" />
-          <path d={headD(Q, 13, 10)} fill={C.order} stroke={C.halo} strokeWidth={1} />
+          <path d={polyD(body)} fill="none" stroke={C.halo} strokeWidth={sel ? 7 : 4} strokeLinejoin="round" strokeLinecap="round" />
+          {sel && <path d={polyD(body)} fill="none" stroke={C.ink} strokeOpacity={0.25} strokeWidth={7} strokeLinejoin="round" />}
+          <path d={polyD(body)} fill="none" stroke={C.order} strokeWidth={1.9} strokeDasharray={dash} strokeLinejoin="round" strokeLinecap="round" />
+          <path d={headD(Q, 13 * sk, 10 * sk)} fill={C.order} stroke={C.halo} strokeWidth={1} />
           {showLabels && d.label && text(Q[0][0], Q[0][1] - 9, d.label, C.order, 'middle', fs, 700)}
           {sel && P.map((p, i) => <rect key={i} x={p[0] - 3.5} y={p[1] - 3.5} width={7} height={7} fill="#fff" stroke={C.ink} strokeWidth={1.2} />)}
         </g>);
       } else {
         els.push(<g key={key}>
-          <path d={polyD(Q)} fill="none" stroke={C.halo} strokeWidth={sel ? 8 : 5} strokeLinejoin="round" />
-          {sel && <path d={polyD(Q)} fill="none" stroke={C.ink} strokeOpacity={0.25} strokeWidth={8} />}
-          <path d={polyD(Q)} fill="none" stroke={C.phase} strokeWidth={2.4} strokeDasharray="10 6" strokeLinejoin="round" />
+          <path d={polyD(Q)} fill="none" stroke={C.halo} strokeWidth={sel ? 7 : 4} strokeLinejoin="round" />
+          {sel && <path d={polyD(Q)} fill="none" stroke={C.ink} strokeOpacity={0.25} strokeWidth={7} />}
+          <path d={polyD(Q)} fill="none" stroke={C.phase} strokeWidth={1.9} strokeDasharray="8 5" strokeLinejoin="round" />
           {showLabels && text(Q[0][0], Q[0][1] - 8, d.label || 'PL', C.phase, 'middle', fs, 700)}
           {showLabels && text(Q[Q.length - 1][0], Q[Q.length - 1][1] + 15, d.label || 'PL', C.phase, 'middle', fs, 700)}
           {sel && P.map((p, i) => <rect key={i} x={p[0] - 3.5} y={p[1] - 3.5} width={7} height={7} fill="#fff" stroke={C.ink} strokeWidth={1.2} />)}
@@ -408,7 +416,7 @@ function DrawingsSvg(props: {
       const w = Math.abs(P[1][0] - P[0][0]), h = Math.abs(P[1][1] - P[0][1]);
       els.push(<g key={key}>
         {sel && <rect x={x0 - 3} y={y0 - 3} width={w + 6} height={h + 6} fill="none" stroke={C.ink} strokeOpacity={0.35} strokeWidth={1.5} strokeDasharray="3 3" />}
-        <rect x={x0} y={y0} width={w} height={h} fill={d.areaType === 'airstrike' ? `url(#hatch-${map})` : col} fillOpacity={d.areaType === 'airstrike' ? 1 : 0.1} stroke={col} strokeWidth={1.8} strokeDasharray={dash ?? (d.areaType === 'warning' ? '2 0' : undefined)} />
+        <rect x={x0} y={y0} width={w} height={h} fill={d.areaType === 'airstrike' ? `url(#hatch-${map})` : col} fillOpacity={d.areaType === 'airstrike' ? 1 : 0.1} stroke={col} strokeWidth={1.4} strokeDasharray={dash ?? (d.areaType === 'warning' ? '2 0' : undefined)} />
         {showLabels && text(x0 + 4, y0 + fs + 2, d.label || '', col, 'start', fs, 700)}
       </g>);
     } else if (d.kind === 'circle') {
@@ -424,23 +432,24 @@ function DrawingsSvg(props: {
     } else if (d.kind === 'source') {
       const o = P[0], q = P[1];
       const brg = bearingDeg(d.pts[0], d.pts[1]);
-      const r = Math.max(24, Math.hypot(q[0] - o[0], q[1] - o[1]));
+      const r = Math.max(16, Math.hypot(q[0] - o[0], q[1] - o[1]));
+      const xr = 6 * sk;
       const half = ((d.sector ?? 0) / 2) * Math.PI / 180;
       const a = brg * Math.PI / 180;
       // arrow from source toward hit point
       const ux = Math.sin(a), uy = -Math.cos(a);
       const start: V2 = [o[0] + ux * r, o[1] + uy * r];
-      const end: V2 = [o[0] + ux * 13, o[1] + uy * 13];
+      const end: V2 = [o[0] + ux * 13 * sk, o[1] + uy * 13 * sk];
       els.push(<g key={key}>
         {half > 0 && <path d={wedgeD(o, a, half, r)} fill={C.enemy} fillOpacity={0.09} stroke={C.enemy} strokeOpacity={0.7} strokeWidth={1.2} strokeDasharray="5 4" />}
-        {sel && <circle cx={o[0]} cy={o[1]} r={16} fill="none" stroke={C.ink} strokeWidth={1.4} strokeDasharray="3 3" />}
-        <path d={polyD([start, end])} stroke={C.halo} strokeWidth={5} />
-        <path d={polyD([start, trimEnd([start, end], 8)[1]])} stroke={C.enemy} strokeWidth={2.2} strokeDasharray="6 4" />
-        <path d={headD([start, end], 11, 9)} fill={C.enemy} />
-        <path d={`M${o[0] - 6} ${o[1] - 6}L${o[0] + 6} ${o[1] + 6}M${o[0] + 6} ${o[1] - 6}L${o[0] - 6} ${o[1] + 6}`} stroke={C.halo} strokeWidth={5} />
-        <path d={`M${o[0] - 6} ${o[1] - 6}L${o[0] + 6} ${o[1] + 6}M${o[0] + 6} ${o[1] - 6}L${o[0] - 6} ${o[1] + 6}`} stroke={C.enemy} strokeWidth={2.4} />
+        {sel && <circle cx={o[0]} cy={o[1]} r={xr + 8} fill="none" stroke={C.ink} strokeWidth={1.4} strokeDasharray="3 3" />}
+        <path d={polyD([start, end])} stroke={C.halo} strokeWidth={4} />
+        <path d={polyD([start, trimEnd([start, end], 8 * sk)[1]])} stroke={C.enemy} strokeWidth={1.8} strokeDasharray="6 4" />
+        <path d={headD([start, end], 11 * sk, 9 * sk)} fill={C.enemy} />
+        <path d={`M${o[0] - xr} ${o[1] - xr}L${o[0] + xr} ${o[1] + xr}M${o[0] + xr} ${o[1] - xr}L${o[0] - xr} ${o[1] + xr}`} stroke={C.halo} strokeWidth={4} />
+        <path d={`M${o[0] - xr} ${o[1] - xr}L${o[0] + xr} ${o[1] + xr}M${o[0] + xr} ${o[1] - xr}L${o[0] - xr} ${o[1] + xr}`} stroke={C.enemy} strokeWidth={2} />
         {showLabels && text(start[0], start[1] + (uy > 0 ? 14 : -7), `${d.label || '未确认'} · ${fmtBearing(brg)}`, C.enemy, 'middle', fs, 700)}
-        {layers.time && d.showTime && text(o[0], o[1] + 20, fmtClock(d.t), C.enemy, 'middle', fs - 1, 600)}
+        {layers.time && d.showTime && text(o[0], o[1] + xr + fs + 2, fmtClock(d.t), C.enemy, 'middle', fs - 1, 600)}
       </g>);
     }
   }
@@ -525,9 +534,11 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
   const inView = (p: V2, m = 24) => p[0] > -m && p[1] > -m && p[0] < S + m && p[1] < S + m;
   const now = performance.now();
   const font = (px: number, w = 600) => `${w} ${px}px "Noto Sans SC","PingFang SC","Microsoft YaHei",Arial,sans-serif`;
-  const label = (t: string, x: number, y: number, col: string, px = compact ? 10 : 11, align: CanvasTextAlign = 'center') => {
+  const sk = symK(v.z), tk = txtK(v.z);
+  const label = (t: string, x: number, y: number, col: string, px0 = compact ? 10 : 11, align: CanvasTextAlign = 'center') => {
+    const px = Math.max(8, Math.round(px0 * tk));
     ctx.font = font(px); ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(246,244,236,0.92)'; ctx.lineWidth = 3.2; ctx.strokeText(t, x, y);
+    ctx.strokeStyle = 'rgba(246,244,236,0.92)'; ctx.lineWidth = 2.6; ctx.strokeText(t, x, y);
     ctx.fillStyle = col; ctx.fillText(t, x, y);
   };
   const sprite = (sidc: string, size: number, x: number, y: number, opt: Parameters<typeof unitSprite>[2] = {}, alpha = 1) => {
@@ -539,7 +550,7 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
     return sp;
   };
   const cellPx = gridBox(map).stepX * S * v.z;
-  const usz = S >= 600 ? 21 : S >= 420 ? 18 : 15;
+  const usz = Math.max(9, Math.round((S >= 600 ? 21 : S >= 420 ? 18 : 15) * sk));
   // air overview: the ground battle area is tiny → shrink ground objects, hide their labels (plan §5.3)
   const ov = !separateMaps() && gridBox('ground').w * (map === 'ground' ? 1 : 0.1875) * S * v.z < 240;
   if (!MAPS[map].available) return;
@@ -558,6 +569,41 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
     ctx.strokeStyle = C.enemy; ctx.lineWidth = 1.5; ctx.strokeRect(p[0] - 4, p[1] - 4, 8, 8);
   }
 
+  // v2: respawn points (one small flag per spawn area; tank = pennant, air = chevron) + airfield runways
+  const mk = snap.marks[map];
+  if (mk && s.layers.spawns) {
+    const nToS = (x: number, y: number): V2 => [(x - v.cx) * S * v.z + S / 2, (y - v.cy) * S * v.z + S / 2];
+    for (const af of mk.airfields) {
+      const a = nToS(af.a[0], af.a[1]), b = nToS(af.b[0], af.b[1]);
+      if (!inView(a, 60) && !inView(b, 60)) continue;
+      const col = af.side === 'enemy' ? 'rgba(200,40,28,0.75)' : 'rgba(43,98,196,0.75)';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(246,244,236,0.85)'; ctx.lineWidth = 4.5; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      ctx.strokeStyle = col; ctx.lineWidth = 2.2; ctx.stroke(); ctx.lineCap = 'butt';
+    }
+    const fs = Math.max(5, 7 * sk + 1);
+    for (const sp of mk.spawns) {
+      const p = nToS(sp.x, sp.y);
+      if (!inView(p, 12)) continue;
+      const col = sp.side === 'enemy' ? C.enemy : C.friend;
+      ctx.globalAlpha = 0.85;
+      ctx.lineJoin = 'round';
+      if (sp.k === 'tank') {
+        // pennant on a short pole, foot at the spawn point
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0], p[1] - fs * 1.6); ctx.lineTo(p[0] + fs * 1.1, p[1] - fs * 1.15); ctx.lineTo(p[0], p[1] - fs * 0.7);
+        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.fillStyle = col; ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0], p[1] - fs * 1.6); ctx.stroke();
+      } else {
+        // air spawn: small open chevron
+        ctx.beginPath(); ctx.moveTo(p[0] - fs * 0.8, p[1] + fs * 0.4); ctx.lineTo(p[0], p[1] - fs * 0.6); ctx.lineTo(p[0] + fs * 0.8, p[1] + fs * 0.4);
+        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 3.4; ctx.stroke();
+        ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // radio: pings at the target grid cell (uniform, ~30 s) + location calls at the sender (brief)
   for (const pg of snap.pings) {
     if (pg.only !== map) continue;
@@ -570,13 +616,14 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
     }
     if (!inView(c, 40)) continue;
     const ph = (now % 1400) / 1400;
-    ctx.strokeStyle = `rgba(201,120,15,${0.7 * (1 - ph)})`; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(c[0], c[1], 8 + ph * 18, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(c[0], c[1], 11, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = C.order; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(c[0], c[1], 11, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); ctx.stroke();
-    ctx.fillStyle = C.order; ctx.beginPath(); ctx.arc(c[0], c[1], 4, 0, Math.PI * 2); ctx.fill();
+    const pr = 11 * sk;
+    ctx.strokeStyle = `rgba(201,120,15,${0.7 * (1 - ph)})`; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.arc(c[0], c[1], pr * 0.7 + ph * 16 * sk, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(c[0], c[1], pr, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = C.order; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.arc(c[0], c[1], pr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); ctx.stroke();
+    ctx.fillStyle = C.order; ctx.beginPath(); ctx.arc(c[0], c[1], 2.6, 0, Math.PI * 2); ctx.fill();
     if (pg.area) { const a = toS(pg.area[0]); label(`${pg.grid ?? ''} 标点 ${Math.ceil(pg.remainMs / 1000)}s`, Math.max(4, a[0] + 3), Math.max(8, a[1] + 9), C.order, compact ? 10 : 11, 'left'); }
-    else label(`标点 ${Math.ceil(pg.remainMs / 1000)}s`, c[0], c[1] - 20, C.order, compact ? 10 : 11);
+    else label(`标点 ${Math.ceil(pg.remainMs / 1000)}s`, c[0], c[1] - pr - 8, C.order, compact ? 10 : 11);
   }
   for (const cl of snap.calls) {
     if (cl.only !== map) continue;
@@ -584,11 +631,12 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
     const k = Math.max(0, Math.min(1, cl.remainMs / cl.ttlMs));
     ctx.globalAlpha = 0.35 + 0.65 * k;
     const ph = (now % 1000) / 1000;
-    ctx.strokeStyle = `rgba(43,98,196,${0.8 * (1 - ph)})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(c[0], c[1], 10 + ph * 14, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = C.friend; ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(c[0], c[1] - 9); ctx.lineTo(c[0] + 8, c[1] + 6); ctx.lineTo(c[0] - 8, c[1] + 6); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = font(10, 800); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', c[0], c[1] + 1);
-    label(cl.text, c[0], c[1] + 18, C.friend, compact ? 10 : 11);
+    const tr = 9 * sk;
+    ctx.strokeStyle = `rgba(43,98,196,${0.8 * (1 - ph)})`; ctx.lineWidth = 1.6; ctx.beginPath(); ctx.arc(c[0], c[1], tr + ph * 12 * sk, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = C.friend; ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(c[0], c[1] - tr); ctx.lineTo(c[0] + tr * 0.9, c[1] + tr * 0.67); ctx.lineTo(c[0] - tr * 0.9, c[1] + tr * 0.67); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = font(Math.round(10 * sk), 800); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', c[0], c[1] + 1);
+    label(cl.text, c[0], c[1] + tr + 9, C.friend, compact ? 9 : 10);
     ctx.globalAlpha = 1;
   }
 
@@ -606,18 +654,18 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
       const small = ov && !f.air;
       if (!stale && f.hdg != null) {
         const a = f.hdg * Math.PI / 180;
-        const L = small ? 11 : usz + 4;
+        const L = small ? 8 : usz + 3;
         const tip: V2 = [p[0] + Math.sin(a) * L, p[1] - Math.cos(a) * L];
-        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 4.5; ctx.lineCap = 'round';
+        ctx.strokeStyle = 'rgba(246,244,236,0.95)'; ctx.lineWidth = 3.5; ctx.lineCap = 'round';
         ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke();
-        ctx.strokeStyle = tone; ctx.lineWidth = 2.2;
+        ctx.strokeStyle = tone; ctx.lineWidth = 1.7;
         ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke(); ctx.lineCap = 'butt';
         const hx = Math.sin(a), hy = -Math.cos(a);
         ctx.fillStyle = tone;
-        const hs = small ? 3 : 4.5;
+        const hs = (small ? 3 : 4.5) * Math.max(0.7, sk);
         ctx.beginPath(); ctx.moveTo(tip[0] + hx * hs * 1.1, tip[1] + hy * hs * 1.1); ctx.lineTo(tip[0] - hy * hs, tip[1] + hx * hs); ctx.lineTo(tip[0] + hy * hs, tip[1] - hx * hs); ctx.closePath(); ctx.fill();
       }
-      const size = small ? (f.self ? 13 : 11) : f.self ? usz + 2 : squad ? usz : usz - 2;
+      const size = small ? (f.self ? 10 : 8) : f.self ? usz + 2 : squad ? usz : usz - 2;
       const sp = sprite(f.sidc, size, p[0], p[1], { fill: f.self && !stale ? C.self : undefined, squad: squad && !stale, grey: stale }, stale ? 0.75 : 1);
       if (f.self && !f.alive) {
         // dead: cross over the last own position (the Player icon now follows the spectated teammate)
@@ -626,7 +674,8 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
       }
       if (s.layers.labels && (!small || f.self) && (f.self || f.nick)) {
         const t = f.self && !f.alive ? `${f.nick} · 阵亡 ${Math.floor(f.ageMs / 1000)}s` : stale && f.nick ? `${f.nick} · ${Math.floor(f.ageMs / 1000)}s` : f.nick;
-        if (t && (f.self || cellPx > 120)) label(t, p[0], p[1] + sp.h - sp.ay + 7, col, S >= 600 ? 12 : compact ? 10 : 11);
+        // v2: teammate/squad names only when zoomed in; self always
+        if (t && (f.self || (squad && v.z >= 2) || cellPx > 240)) label(t, p[0], p[1] + sp.h - sp.ay + 6, col, f.self ? (S >= 600 ? 11 : compact ? 9 : 10) : 9);
       }
     }
   }
@@ -634,14 +683,15 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
   // enemies: only the occasional live red markers 8111 exports (spawn-proximity reveals → 压家) + short last-seen ghost
   if (s.policy !== 'off' && s.layers.enemy) {
     const fused = s.policy === 'fused';
-    const list = snap.contacts.filter((c) => !c.only || c.only === map).sort((a, b) => Number(a.visible) - Number(b.visible));
+    const list = snap.contacts.filter((c) => !c.only || c.only === map).sort((a, b) => Number(a.visible) - Number(b.visible) || (a.spawnM ?? 1e9) - (b.spawnM ?? 1e9));
+    const placed: [number, number, number, number][] = [];
     for (const c of list) {
       const life = c.air ? (fused ? 15000 : 5000) : (fused ? 30000 : 8000);
       if (!c.visible && c.ageMs > life) continue;
       const p = toS(c.w);
       if (!inView(p, 60)) continue;
       const sidc = ICON_SIDC[c.icon] ?? 'SHGPU-----';
-      const sz = c.air ? usz : ov ? 10 : usz;
+      const sz = c.air ? usz : ov ? 8 : usz;
       const rr = sz * 0.72;
       if (c.visible) {
         const camp = !DEMO && !c.air && (c.spawnM == null || c.spawnM <= 400);
@@ -649,8 +699,8 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
         if (camp) {
           ctx.fillStyle = `rgba(240,20,0,${0.10 + 0.10 * ph})`;
           ctx.beginPath(); ctx.arc(p[0], p[1], rr * 2.1, 0, Math.PI * 2); ctx.fill();
-          ctx.strokeStyle = `rgba(220,20,0,${0.55 + 0.45 * ph})`; ctx.lineWidth = 3;
-          ctx.beginPath(); ctx.arc(p[0], p[1], rr * 1.5 + ph * 4, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = `rgba(220,20,0,${0.55 + 0.45 * ph})`; ctx.lineWidth = 2.2;
+          ctx.beginPath(); ctx.arc(p[0], p[1], rr * 1.5 + ph * 3, 0, Math.PI * 2); ctx.stroke();
         } else if (c.blink === 2 && c.reveal !== 'air') {
           ctx.strokeStyle = `rgba(240,12,0,${0.35 + 0.5 * ph})`; ctx.lineWidth = ov ? 1.4 : 2;
           ctx.beginPath(); ctx.arc(p[0], p[1], rr + 1 + ph * 3, 0, Math.PI * 2); ctx.stroke();
@@ -658,14 +708,20 @@ function drawLive(ctx: CanvasRenderingContext2D, S: number, dpr: number, map: Ma
         if (c.air && c.hdg != null) {
           const a = c.hdg * Math.PI / 180;
           ctx.strokeStyle = C.enemy; ctx.lineWidth = 1.6;
-          ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] + Math.sin(a) * 17, p[1] - Math.cos(a) * 17); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[0] + Math.sin(a) * usz * 0.85, p[1] - Math.cos(a) * usz * 0.85); ctx.stroke();
         }
         sprite(sidc, sz, p[0], p[1], { dashed: true });
         if (camp) {
           const t = `压家 · ${ICON_ZH[c.icon] ?? c.icon}${c.spawnM != null ? ` ${Math.round(c.spawnM)}m` : ''}`;
-          ctx.font = font(compact ? 11 : 12, 800); const w = ctx.measureText(t).width + 10, y = p[1] - sz - 12;
-          ctx.fillStyle = 'rgba(200,24,10,0.92)'; ctx.fillRect(p[0] - w / 2, y - 9, w, 18);
-          ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, p[0], y + 0.5);
+          const fpx = Math.max(9, Math.round((compact ? 10 : 11) * tk));
+          ctx.font = font(fpx, 800); const w = ctx.measureText(t).width + 8, y = p[1] - rr * 1.5 - fpx;
+          const box: [number, number, number, number] = [p[0] - w / 2, y - fpx * 0.7, p[0] + w / 2, y + fpx * 0.7];
+          // v2: several 压家 enemies close together → only the first label (rings still show each one)
+          if (!placed.some((q) => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1])) {
+            placed.push(box);
+            ctx.fillStyle = 'rgba(200,24,10,0.92)'; ctx.fillRect(box[0], box[1], w, fpx * 1.4);
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, p[0], y + 0.5);
+          }
         } else if (!ov && (cellPx > 150 || !DEMO) && s.layers.labels) label(ICON_ZH[c.icon] ?? c.icon, p[0], p[1] + sz - 1, C.enemy, compact ? 9 : 10);
       } else {
         // ghost / last seen

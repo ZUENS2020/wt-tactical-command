@@ -38,7 +38,11 @@ export interface Snapshot {
   pings: Ping[]; calls: Call[]; feed: FeedLine[];
   conn: Conn; inBattle: boolean; collectors: Collector[]; viewers: number; room: string; battleId: string | null;
   rtt: number | null;
+  /** live: clustered respawn points + airfield runways per map (normalized coords) */
+  marks: Partial<Record<'ground' | 'air', Marks>>;
 }
+export interface SpawnMark { k: string; side: 'ally' | 'enemy'; x: number; y: number; n: number }
+export interface Marks { spawns: SpawnMark[]; airfields: { side: 'ally' | 'enemy'; a: [number, number]; b: [number, number] }[] }
 export const EXTRA_EMPTY = { pings: [] as Ping[], calls: [] as Call[], feed: [] as FeedLine[], collectors: [] as Collector[] };
 
 const BATTLE_T0 = 372; // battle clock starts at 06:12
@@ -221,7 +225,7 @@ function build(t: number): Snapshot {
   const af = AIR.airfield ? [normToCanon('air', [AIR.airfield[0], AIR.airfield[1]]), normToCanon('air', [AIR.airfield[2], AIR.airfield[3]])] as [V2, V2] : null;
   const bombing = AIR.bombing.filter((b) => (t % AIR_PERIOD) >= b[2]).map((b) => normToCanon('air', [b[0], b[1]]));
   return { t, battle, friends, contacts, airfield: af, bombing, stale: false, ageMs: 0, latency: 96 + ((Math.sin(t / 2300) + 1) * 18) | 0, hz: 10,
-    ...EXTRA_EMPTY, conn: 'demo', inBattle: true, viewers: 1, room: 'DEMO', battleId: 'demo', rtt: null };
+    ...EXTRA_EMPTY, conn: 'demo', inBattle: true, viewers: 1, room: 'DEMO', battleId: 'demo', rtt: null, marks: {} };
 }
 
 function tick() {

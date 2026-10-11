@@ -87,6 +87,8 @@ struct MapEntry {
     info: MapInfo,
     img: Option<String>,
     since: i64,
+    /// last seen static marks on this map: clustered respawn points + airfields (survive view switches)
+    marks: Value,
 }
 
 #[derive(Clone, Debug)]
@@ -138,6 +140,47 @@ pub struct LiveCol {
     events: VecDeque<Value>,
     hud_seen: HashSet<i64>,
     paused: Option<(i64, bool, String)>,
+    aa_dropped: u32,
+}
+
+const AIRFIELD_AA_M: f64 = 3000.0;
+
+fn side_of_color(c: &str) -> &'static str {
+    match c.to_ascii_lowercase().as_str() {
+        "#fa0c00" | "#f00c00" => "enemy",
+        _ => "ally",
+    }
+}
+
+/// distance (m) from point to segment, in map-normalized coords scaled by the map span
+fn seg_dist(x: f64, y: f64, sx: f64, sy: f64, ex: f64, ey: f64, span: [f64; 2]) -> f64 {
+    let (px, py, ax, ay, bx, by) = (x * span[0], y * span[1], sx * span[0], sy * span[1], ex * span[0], ey * span[1]);
+    let (dx, dy) = (bx - ax, by - ay);
+    let l2 = dx * dx + dy * dy;
+    let k = if l2 > 0.0 { (((px - ax) * dx + (py - ay) * dy) / l2).clamp(0.0, 1.0) } else { 0.0 };
+    ((px - ax - k * dx).powi(2) + (py - ay - k * dy).powi(2)).sqrt()
+}
+
+/// One marker per spawn area: greedy clustering of respawn points of the same kind + side
+/// (tank points within 350 m, air spawns within 2 km); points far outside the map are dropped.
+fn cluster_spawns(pts: &[(String, &'static str, f64, f64)], span: [f64; 2]) -> Vec<Value> {
+    let mut cl: Vec<(String, &'static str, f64, f64, u32)> = Vec::new();
+    for (k, side, x, y) in pts {
+        if *x < -0.05 || *y < -0.05 || *x > 1.05 || *y > 1.05 {
+            continue;
+        }
+        let r = if k == "tank" { 350.0 } else { 2000.0 };
+        match cl.iter_mut().find(|c| &c.0 == k && c.1 == *side && (((c.2 - x) * span[0]).powi(2) + ((c.3 - y) * span[1]).powi(2)).sqrt() < r) {
+            Some(c) => {
+                let n = c.4 as f64;
+                c.2 = (c.2 * n + x) / (n + 1.0);
+                c.3 = (c.3 * n + y) / (n + 1.0);
+                c.4 += 1;
+            }
+            None => cl.push((k.clone(), side, *x, *y, 1)),
+        }
+    }
+    cl.into_iter().map(|(k, side, x, y, n)| json!({"k": k, "side": side, "x": r6(x), "y": r6(y), "n": n})).collect()
 }
 
 fn hdg_of(o: &Value) -> Option<f64> {
@@ -220,7 +263,7 @@ impl LiveCol {
                             None => {
                                 // same gen + kind but changed range => replace that entry
                                 self.maps.retain(|m| !(m.info.gen == mi.gen && m.info.kind() == mi.kind()));
-                                self.maps.push(MapEntry { sig, info: mi, img: None, since: t });
+                                self.maps.push(MapEntry { sig, info: mi, img: None, since: t, marks: Value::Null });
                                 self.cur = Some(self.maps.len() - 1);
                             }
                         }
@@ -310,6 +353,33 @@ impl LiveCol {
         let mut spawns = Vec::new();
         let mut own: Option<&Value> = None;
         let mut spect = false;
+        let span = self.cur_map().map(|m| m.info.span()).unwrap_or([4096.0, 4096.0]);
+        // airfields (runway segments) and all respawn points of this frame
+        let mut airfields: Vec<(f64, f64, f64, f64, &'static str)> = Vec::new();
+        let mut rpts: Vec<(String, &'static str, f64, f64)> = Vec::new();
+        for o in a {
+            let side = match o["color"].as_str().map(side_of_color) { Some(s) => s, None => continue };
+            match o["type"].as_str() {
+                Some("airfield") => {
+                    if let (Some(sx), Some(sy), Some(ex), Some(ey)) = (o["sx"].as_f64(), o["sy"].as_f64(), o["ex"].as_f64(), o["ey"].as_f64()) {
+                        airfields.push((sx, sy, ex, ey, side));
+                    }
+                }
+                Some(ty) if ty.starts_with("respawn_base") => {
+                    if let (Some(x), Some(y)) = (o["x"].as_f64(), o["y"].as_f64()) {
+                        rpts.push((ty.trim_start_matches("respawn_base").trim_start_matches('_').to_string(), side, x, y));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let near_airfield = |x: f64, y: f64| {
+            airfields.iter().any(|(sx, sy, ex, ey, _)| {
+                let d = seg_dist(x, y, *sx, *sy, *ex, *ey, span);
+                d < AIRFIELD_AA_M
+            })
+        };
+        let mut aa_dropped = 0u32;
         for o in a {
             let c = classify(o);
             let icon = o["icon"].as_str().unwrap_or("");
@@ -321,6 +391,15 @@ impl LiveCol {
             }
             if !c.is_unit() {
                 continue;
+            }
+            // airfield AA defences (ground_model "Airdefence", always #174DFF in recordings, 97 % within 3 km of a runway): clutter, drop
+            if icon == "Airdefence" {
+                if let (Some(x), Some(y)) = (o["x"].as_f64(), o["y"].as_f64()) {
+                    if near_airfield(x, y) {
+                        aa_dropped += 1;
+                        continue;
+                    }
+                }
             }
             let (Some(x), Some(y)) = (o["x"].as_f64(), o["y"].as_f64()) else { continue };
             let air = o["type"].as_str() == Some("aircraft");
@@ -347,6 +426,14 @@ impl LiveCol {
         }
         self.units = units;
         self.spawns = spawns;
+        self.aa_dropped = aa_dropped;
+        if let Some(i) = self.cur {
+            let marks = json!({
+                "spawns": cluster_spawns(&rpts, span),
+                "airfields": airfields.iter().map(|(sx, sy, ex, ey, side)| json!({"side": side, "a": [r6(*sx), r6(*sy)], "b": [r6(*ex), r6(*ey)]})).collect::<Vec<_>>(),
+            });
+            self.maps[i].marks = marks;
+        }
         self.spectating = spect;
         let kind = self.cur_kind();
         let me = &mut self.me;
@@ -702,11 +789,13 @@ impl Hub {
                 "member": members.iter().any(|m| m.session == c.session), "age_ms": now - c.last_recv,
                 "lag_ms": if c.last_data_ts > 0 { Some(now - c.last_data_ts) } else { None }, "delay_ms": c.delay_p50(), "hz": c.hz(),
                 "paused": c.paused.as_ref().filter(|p| now - p.0 < 75_000).map(|p| p.1).unwrap_or(false),
-                "map": c.cur_map().map(|m| m.info.kind()), "spectating": c.spectating})
+                "map": c.cur_map().map(|m| m.info.kind()), "spectating": c.spectating, "aa_filtered": c.aa_dropped})
             })
             .collect();
         let b = room.battle();
+        let marks: BTreeMap<&str, &Value> = best.iter().filter(|(_, (m, _))| !m.marks.is_null()).map(|(k, (m, _))| (*k, &m.marks)).collect();
         let state = json!({
+            "marks": marks,
             "type": "state", "room": room.name, "battle": b.map(|b| &b.id), "battle_started": b.map(|b| b.started), "in_battle": in_battle,
             "maps": b.map(|b| &b.maps), "units": units, "pings": pick("ping"), "calls": pick("call"), "feed": pick("feed"), "toasts": pick("toast"),
             "collectors": collectors, "viewers": room.tx.receiver_count(),
@@ -863,7 +952,7 @@ mod tests {
         let mut h = Hub { cols: HashMap::new(), rooms: HashMap::new(), dir: std::env::temp_dir().join("wt-live-test"), default_room: "t".into(), room_map: HashMap::new(), nicks: [("p".to_string(), "Me".to_string())].into(), view_key: String::new() };
         let _ = std::fs::create_dir_all(&h.dir);
         h.feed("s1", "p", None, &rec(1, "/map_info.json", now - 5000, MI), now);
-        let me = |c: &str, x: f64| format!(r##"[{{"type":"ground_model","icon":"Player","color":"{c}","blink":0,"x":{x},"y":0.5,"dx":1.0,"dy":0.0}},{{"type":"ground_model","icon":"HeavyTank","color":"#fa0C00","blink":0,"x":0.3,"y":0.3}},{{"type":"respawn_base_tank","icon":"respawn_base_tank","color":"#174DFF","blink":0,"x":0.31,"y":0.31}}]"##);
+        let me = |c: &str, x: f64| format!(r##"[{{"type":"ground_model","icon":"Player","color":"{c}","blink":0,"x":{x},"y":0.5,"dx":1.0,"dy":0.0}},{{"type":"ground_model","icon":"HeavyTank","color":"#fa0C00","blink":0,"x":0.3,"y":0.3}},{{"type":"respawn_base_tank","icon":"respawn_base_tank","color":"#174DFF","blink":0,"x":0.31,"y":0.31}},{{"type":"respawn_base_tank","icon":"respawn_base_tank","color":"#174DFF","blink":0,"x":0.32,"y":0.31}},{{"type":"respawn_base_tank","icon":"respawn_base_tank","color":"#fa0C00","blink":0,"x":0.8,"y":0.8}},{{"type":"airfield","color":"#174DFF","blink":0,"icon":"none","sx":0.9,"sy":0.1,"ex":0.95,"ey":0.1}},{{"type":"ground_model","icon":"Airdefence","color":"#174DFF","blink":0,"x":0.93,"y":0.12}},{{"type":"respawn_base_fighter","icon":"respawn_base_fighter","color":"#174DFF","blink":0,"x":-2.5,"y":0.5}}]"##);
         h.feed("s1", "p", None, &rec(2, "/map_obj.json", now - 4000, &me("#faC81E", 0.5)), now);
         h.feed("s1", "p", None, &rec(3, "/hudmsg", now - 3900, r#"{"events":[],"damage":[{"id":9,"msg":"X (T-34) 击毁了 Me (Tiger)"}]}"#), now);
         h.feed("s1", "p", None, &rec(4, "/map_obj.json", now - 3800, &me("#faC81E", 0.6)), now);
@@ -882,6 +971,11 @@ mod tests {
         assert_eq!(en.len(), 1);
         assert!(en[0]["spawn_m"].as_f64().unwrap() < 100.0);
         assert_eq!(s["feed"][0]["dead"], true);
+        assert!(!s["units"].as_array().unwrap().iter().any(|u| u["icon"] == "Airdefence"), "airfield AA filtered");
+        let sp = s["marks"]["ground"]["spawns"].as_array().unwrap();
+        assert_eq!(sp.len(), 2, "two tank spawn clusters, off-map fighter spawn dropped: {sp:?}");
+        assert_eq!(sp.iter().find(|x| x["side"] == "ally").unwrap()["n"], 2);
+        assert_eq!(s["marks"]["ground"]["airfields"].as_array().unwrap().len(), 1);
         // drawings
         let r = h.draw_op("t", &json!({"op": "put", "d": {"id": "a1", "kind": "point", "pts": [[1, 2]]}}), "c1", now).unwrap();
         assert!(r.contains("\"created\":true"));

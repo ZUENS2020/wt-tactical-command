@@ -239,7 +239,7 @@ function RulerOpts({ cmd }: { cmd: boolean }) {
 function LayerOpts({ cmd }: { cmd: boolean }) {
   const L = useStore((s) => s.layers);
   const set = (k: keyof typeof L) => setState((s) => ({ layers: { ...s.layers, [k]: !s.layers[k] } }));
-  const rows: [keyof typeof L, string][] = [['grid', '网格'], ['friendly', '友军'], ['enemy', '自动敌情'], ['drawings', '标绘'], ['labels', '名称'], ['time', '时间标签'], ['lockDrawings', '锁定标绘']];
+  const rows: [keyof typeof L, string][] = [['grid', '网格'], ['friendly', '友军'], ['spawns', '重生点/机场'], ['enemy', '自动敌情'], ['drawings', '标绘'], ['labels', '名称'], ['time', '时间标签'], ['lockDrawings', '锁定标绘']];
   return (
     <div className="layers">
       {rows.map(([k, l]) => <Toggle key={k} on={L[k]} label={l} onClick={() => set(k)} />)}

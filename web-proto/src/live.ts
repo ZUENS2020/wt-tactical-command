@@ -1,7 +1,7 @@
 // Live client: WebSocket to the receiver (/api/live) → Snapshot (same shape as the demo sim) + shared drawings sync.
 import { MAPS, CANON, setSeparateMaps, type MapId, type V2 } from './geo';
 import { getState, setState, toast, type Drawing } from './store';
-import type { Snapshot, Friend, Contact, Ping, Call, FeedLine, Collector, Conn } from './sim';
+import type { Snapshot, Friend, Contact, Ping, Call, FeedLine, Collector, Conn, Marks } from './sim';
 import { EXTRA_EMPTY } from './sim';
 
 const LS_KEY = 'wt-room-key', LS_ROOM = 'wt-room', LS_NICK = 'wt-nick';
@@ -37,6 +37,7 @@ interface StateMsg {
   toasts: { id: string; text: string }[];
   collectors: { session: string; player: string; nick: string; replay: boolean; in_battle: boolean; member: boolean; age_ms: number; lag_ms: number | null; delay_ms: number | null; hz: number; paused: boolean; map: string | null }[];
   viewers: number;
+  marks?: Partial<Record<MapId, Marks>>;
 }
 
 let ws: WebSocket | null = null;
@@ -66,7 +67,7 @@ const emit = () => listeners.forEach((l) => l());
 
 function empty(): Snapshot {
   return { t: 0, battle: 0, friends: [], contacts: [], airfield: null, bombing: [], stale: false, ageMs: 0, latency: 0, hz: 0, ...EXTRA_EMPTY,
-    conn, inBattle: false, viewers: 0, room: cfg.room(), battleId, rtt };
+    conn, inBattle: false, viewers: 0, room: cfg.room(), battleId, rtt, marks: {} };
 }
 
 export function apiUrl(path: string) {
@@ -131,7 +132,7 @@ function build(): Snapshot {
   const latency = Math.round((best?.delayMs ?? 0) + (rtt ?? 0) / 2);
   return { t: sNow, battle: battleTime(), friends, contacts, airfield: null, bombing: [], stale, ageMs: s.in_battle ? Math.max(dataAge, socketAge) : socketAge,
     latency, hz: best ? Math.round(best.hz) : 0, pings, calls, feed, collectors, conn: conn === 'live' && !s.in_battle ? 'idle' : conn,
-    inBattle: s.in_battle, viewers: s.viewers, room: s.room, battleId: s.battle, rtt };
+    inBattle: s.in_battle, viewers: s.viewers, room: s.room, battleId: s.battle, rtt, marks: s.marks ?? {} };
 }
 setInterval(() => { snapshot = build(); emit(); }, 100);
 
