@@ -11,21 +11,21 @@ const R = replay as unknown as { ground: Seg; air: Seg };
 export type Role = 'self' | 'squad' | 'ally';
 export interface Friend {
   id: string; nick: string; air: boolean; sidc: string; w: V2; hdg: number | null;
-  self: boolean; alive: boolean; ageMs: number; real: boolean; vehicle: string;
+  self: boolean; alive: boolean; ageMs: number; real: boolean; vehicle: string; icon?: string;
   role: Role; only?: 'ground' | 'air'; spectating?: boolean;
 }
 export type Reveal = 'static' | 'highlight' | 'air';
 export interface Contact {
   id: string; icon: string; air: boolean; w: V2; hdg: number | null; blink: number;
   visible: boolean; reveal: Reveal; ageMs: number; remainMs?: number; sinceMs: number;
-  speed?: number; vel?: V2; real: boolean; only?: 'ground' | 'air';
+  sources?: string[]; speed?: number; vel?: V2; real: boolean; only?: 'ground' | 'air';
   /** distance (m) to the nearest own tank respawn point: live red markers are spawn-proximity reveals (压家) */
   spawnM?: number | null;
 }
 export interface Ping { id: string; only: 'ground' | 'air'; w: V2; area: [V2, V2] | null; grid: string | null; remainMs: number; ttlMs: number; text: string; }
 export interface Call { id: string; only: 'ground' | 'air'; w: V2; text: string; grid: string | null; remainMs: number; ttlMs: number; }
 export interface FeedLine { id: string; text: string; me: boolean; dead: boolean; ageMs: number; }
-export interface Collector { id: string; nick: string; player: string; inBattle: boolean; member: boolean; ageMs: number; lagMs: number | null; delayMs: number | null; hz: number; paused: boolean; replay: boolean; map: string | null; }
+export interface Collector { id: string; sourceId?: string; self?: boolean; nick: string; player: string; inBattle: boolean; member: boolean; ageMs: number; lagMs: number | null; delayMs: number | null; hz: number; paused: boolean; replay: boolean; map: string | null; }
 export type Conn = 'demo' | 'connecting' | 'live' | 'idle' | 'offline' | 'auth';
 export interface Snapshot {
   t: number;              // sim ms
@@ -39,6 +39,7 @@ export interface Snapshot {
   conn: Conn; inBattle: boolean; collectors: Collector[]; viewers: number; room: string; battleId: string | null;
   rtt: number | null;
   /** live: clustered respawn points + airfield runways per map (normalized coords) */
+  mapAge?: Partial<Record<'ground' | 'air', number>>;
   marks: Partial<Record<'ground' | 'air', Marks>>;
 }
 export interface SpawnMark { k: string; side: 'ally' | 'enemy'; x: number; y: number; n: number }

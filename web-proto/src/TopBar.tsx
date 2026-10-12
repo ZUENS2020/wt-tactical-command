@@ -2,51 +2,18 @@ import { useEffect, useState } from 'react';
 import { getState, setState, useStore } from './store';
 import { setMode } from './actions';
 import { getSnapshot, onSnapshot } from './data';
-
-export const POLICY_SHORT = { off: '关', team_visible: '实时', fused: '残影' } as const;
-
+export const POLICY_SHORT = { off: '关闭', team_visible: '实时', fused: '类别' } as const;
 export function useFresh() {
   const [v, setV] = useState(() => getSnapshot());
-  useEffect(() => {
-    let last = 0;
-    return onSnapshot(() => { const n = performance.now(); if (n - last > 240) { last = n; setV(getSnapshot()); } });
-  }, []);
+  useEffect(() => { let last = 0; return onSnapshot(() => { const now = performance.now(); if (now - last >= 190) { last = now; setV(getSnapshot()); } }); }, []);
   return v;
 }
-
-export default function TopBar({ h, W }: { h: number; W: number }) {
-  const mode = useStore((s) => s.mode);
-  const density = useStore((s) => s.density);
-  const policy = useStore((s) => s.policy);
-  const snap = useFresh();
-  const narrow = W < 520;
-  const xn = W < 430;
-  const tiny = W < 360;
-  const stale = snap.stale && snap.conn !== 'idle';
-  const CONN_TXT: Record<string, string> = { connecting: '连接中', offline: '离线', auth: '需密码', idle: '机库' };
-  const special = CONN_TXT[snap.conn];
-  return (
-    <header className="topbar" style={{ height: h }}>
-      <div className="brand" title="WT Tactical">
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden><path d="M10 1.5L18.5 10 10 18.5 1.5 10z" fill="none" stroke="#3d4a37" strokeWidth="1.8" /><path d="M10 5.5v9M5.5 10h9" stroke="#c9780f" strokeWidth="1.8" /></svg>
-        {!xn && <b>{narrow ? 'WT' : 'WT Tactical'}</b>}
-      </div>
-      <div className="seg top" role="radiogroup" aria-label="地图模式">
-        {([['ground', '陆战'], ['air', '空战'], ['dual', narrow ? '双图' : '双地图']] as const).map(([m, l]) => (
-          <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? 'on' : ''} onClick={() => setMode(m)} data-mode={m}>{l}</button>
-        ))}
-      </div>
-      <div className="seg top dens" role="radiogroup" aria-label="界面密度">
-        {([['command', '指挥'], ['member', '成员']] as const).map(([d, l]) => (
-          <button key={d} role="radio" aria-checked={density === d} className={density === d ? 'on' : ''} onClick={() => setState({ density: d, showMore: false })} data-density={d}>{l}</button>
-        ))}
-      </div>
-      <span className="grow" />
-      <button className={'conn' + (stale || snap.conn === 'offline' || snap.conn === 'auth' ? ' stale' : '') + (snap.conn === 'idle' ? ' idle' : '')} onClick={() => setState({ sheet: getState().sheet ? null : 'settings' })} title="连接与敌情策略" aria-label="连接与设置">
-        <i className="dot" />
-        {(!tiny || stale || special) && <span className="ctext">{special && snap.conn !== 'idle' ? special : snap.conn === 'idle' ? (narrow ? '机库' : `机库 · ${snap.rtt ?? '-'}ms`) : stale ? (tiny ? `${(snap.ageMs / 1000).toFixed(1)}s` : `陈旧 ${(snap.ageMs / 1000).toFixed(1)}s`) : narrow ? `${snap.latency}ms` : `${snap.hz}Hz · ${snap.latency}ms`}</span>}
-        <span className={'pol ' + policy} title={`敌情策略：${policy}`}>{narrow ? POLICY_SHORT[policy][0] : '敌情 ' + POLICY_SHORT[policy]}</span>
-      </button>
-    </header>
-  );
+export default function TopBar({ W }: { W: number }) {
+  const mode = useStore(s => s.mode), snap = useFresh();
+  const status = ({ connecting: '连接中', offline: '离线', auth: '连接', idle: '机库', live: '已连接' } as Record<string, string>)[snap.conn] ?? '已连接';
+  return <header className="topbar">
+    <div className="brand"><span className="brand-cross">✛</span>{W >= 540 && <b>WT TACTICAL</b>}<span className="room">{snap.room || '战术地图'}</span></div>
+    <div className="seg top" role="radiogroup" aria-label="地图模式">{([['ground', '陆战'], ['air', '空战'], ['dual', '双图']] as const).map(([m, l]) => <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? 'on' : ''} data-mode={m} onClick={() => setMode(m)}>{l}</button>)}</div>
+    <span className="grow" /><button className={`conn ${snap.conn === 'offline' || snap.conn === 'auth' ? 'stale' : ''}`} aria-label="连接与设置" onClick={() => setState({ sheet: getState().sheet ? null : 'settings' })}><i className="dot" />{W >= 360 ? status : '⚙'}{W >= 800 && snap.rtt != null && <span className="meta">{snap.rtt} ms</span>}</button>
+  </header>;
 }

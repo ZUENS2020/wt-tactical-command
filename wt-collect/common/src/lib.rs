@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+/// Maximum age of a live observation. Static resources and drawings have their own lifetime.
+pub const LIVE_MAX_AGE_MS: i64 = 2000;
+
 /// One raw sample of one 8111 request (or a synthetic record: ep starting with '#').
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Record {
@@ -52,6 +55,9 @@ pub struct Record {
     /// Collector's match epoch (incremented when a new match is detected; chat/hud cursors reset).
     #[serde(default)]
     pub epoch: u32,
+    /// Opaque collector-local map context captured at request start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_context: Option<String>,
     /// Set by the receiver: number of naval objects removed from this map_obj body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filtered_naval: Option<u32>,
@@ -70,6 +76,10 @@ pub struct Record {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Batch {
     pub session: String,
+    #[serde(default)]
+    pub device_id: String,
+    #[serde(default)]
+    pub nickname: String,
     #[serde(default)]
     pub player: String,
     #[serde(default)]

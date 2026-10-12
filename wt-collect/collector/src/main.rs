@@ -1,6 +1,4 @@
-//! wt-collector: polls the local War Thunder web API (8111/9222, this PC only) and uploads every raw
-//! sample to the wt-receiver (HK server). Nothing is stored locally. 0.2.0: GUI with labeling buttons
-//! (default when started without arguments on Windows), hangar upload pause (gate.rs), labels (labels.rs).
+//! Latest-only War Thunder telemetry collector. Device identity and window settings are persisted; live samples stay in memory.
 mod diag;
 mod game;
 mod clock;
@@ -27,7 +25,7 @@ use wtc_common::{now_ms, Record};
 // The collector never talks to anything but the local game API: loopback or this PC's own
 // private LAN IP, port 8111 or 9222 (auto-detected; see game.rs).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-const DEFAULT_SERVER: &str = "http://43.129.251.18";
+const DEFAULT_SERVER: &str = "https://wt.zuens2020.top";
 
 /// GUI mode: console output is muted (no console window); lines go to the in-memory log shown in the window.
 pub static QUIET: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -203,6 +201,7 @@ pub struct Rates {
 
 #[derive(Debug, Clone)]
 pub struct Cfg {
+    pub device_id: String,
     pub server: String,
     pub token: String,
     pub player: String,
@@ -224,6 +223,27 @@ fn exe_dir() -> PathBuf {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn load_device_id() -> Result<String> {
+    let base = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("XDG_CONFIG_HOME"))
+        .map(PathBuf::from).unwrap_or_else(|| std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(exe_dir).join(".config"));
+    let dir = base.join("wt-tactical-command");
+    std::fs::create_dir_all(&dir)?;
+    let p = dir.join("device-id");
+    let validate = |raw: String| -> Result<String> { let id = raw.trim();
+        if id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit()) { Ok(id.into()) }
+        else { anyhow::bail!("设备身份文件损坏：{}", p.display()) }
+    };
+    if p.exists() { return validate(std::fs::read_to_string(&p)?); }
+    let id = format!("{:032x}", rand::random::<u128>());
+    let tmp = dir.join(format!("device-id-{id}.tmp"));
+    std::fs::write(&tmp, &id)?;
+    // Linking a fully written temporary file publishes the identity atomically, without replacing a concurrent launch.
+    let result = std::fs::hard_link(&tmp, &p);
+    let _ = std::fs::remove_file(tmp);
+    match result { Ok(()) => Ok(id), Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => validate(std::fs::read_to_string(&p)?), Err(e) => Err(e.into()) }
+
 }
 
 fn load_cfg(cli: &Cli) -> Result<Cfg> {
@@ -267,6 +287,7 @@ fn load_cfg(cli: &Cli) -> Result<Cfg> {
     gui_cfg.scale = gui_cfg.scale.clamp(0.6, 3.0);
     gui_cfg.columns = gui_cfg.columns.clamp(1, 6);
     Ok(Cfg {
+        device_id: load_device_id()?,
         labels: label_defs,
         gui: gui_cfg,
         server: cli.server.clone().or(fc.server).unwrap_or_else(|| DEFAULT_SERVER.into()).trim_end_matches('/').to_string(),
@@ -347,7 +368,7 @@ fn is_enemy_color(o: &serde_json::Value) -> bool {
     false
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct UpStat {
     pub ok_batches: u64,
     pub fail: u64,
@@ -372,12 +393,34 @@ pub struct UpStat {
     pub rejected: u64,
 }
 
+#[derive(Default, Clone)]
+pub struct UiSnapshot {
+    game: GameState,
+    up: UpStat,
+    clock: clock::ClockState,
+    paused: Option<(gate::Reason, Instant)>,
+    reachable: bool,
+    base: String,
+    suppressed: u64,
+}
+async fn ui_snapshot_loop(sh: Arc<Shared>, mut stop: watch::Receiver<bool>) {
+    let mut tick = tokio::time::interval(Duration::from_millis(250));
+    loop { tokio::select! { _ = tick.tick() => {
+        let snapshot = UiSnapshot { game: sh.game.lock().unwrap().clone(), up: sh.up.lock().unwrap().clone(),
+            clock: sh.clock.lock().unwrap().clone(), paused: *sh.paused.lock().unwrap(), reachable: sh.reachable(),
+            base: sh.base(), suppressed: sh.suppressed.load(Ordering::Relaxed) };
+        sh.ui.send_replace(snapshot);
+    }, _ = stop.changed() => break } }
+}
+
 pub struct Shared {
+    pub ui: watch::Sender<UiSnapshot>,
     pub session: String,
     pub player: String,
     start: Instant,
     seq: AtomicU64,
     epoch: AtomicU32,
+    map_context: Mutex<Option<String>>,
     last_ok_mono_ms: AtomicI64,
     stats: Mutex<HashMap<&'static str, EpStat>>,
     game: Mutex<GameState>,
@@ -689,7 +732,7 @@ async fn poll_loop(
     sh: Arc<Shared>,
     client: reqwest::Client,
     kind: Kind,
-    tx: mpsc::UnboundedSender<Record>,
+    tx: mpsc::Sender<Record>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut prev_hash: Option<u64> = None;
@@ -723,6 +766,8 @@ async fn poll_loop(
         };
         let wall = now_ms();
         let mono = sh.mono_ns();
+        let context = sh.map_context.lock().unwrap().clone();
+        let sample_seq = sh.next_seq();
         let r = fetch(&client, &sh.base(), &url, REQ_TIMEOUT).await;
         let mut rec = Record {
             session: sh.session.clone(),
@@ -747,7 +792,7 @@ async fn poll_loop(
         let h = if r.err.is_some() { hash64(format!("err:{}", r.err.as_deref().map(err_kind).unwrap_or("")).as_bytes()) } else { hash64(&r.bytes) ^ (r.status as u64) };
         rec.changed = prev_hash != Some(h);
         prev_hash = Some(h);
-        rec.seq = sh.next_seq();
+        rec.seq = sample_seq;
         let ok = r.err.is_none();
         sh.note_result(r.err.as_deref());
         if ok {
@@ -761,6 +806,14 @@ async fn poll_loop(
             postprocess(&sh, kind, &r.bytes, (rec.seq, wall), &mut c_evt, &mut c_dmg, &mut c_chat);
         } else if down_since.is_none() {
             down_since = Some(Instant::now());
+        }
+        let after = sh.map_context.lock().unwrap().clone();
+        if kind == Kind::MapInfo {
+            rec.epoch = sh.epoch.load(Ordering::SeqCst);
+            rec.map_context = after;
+        } else {
+            if context != after || e != sh.epoch.load(Ordering::SeqCst) { continue; }
+            rec.map_context = context;
         }
         set_body(&mut rec, r.bytes);
         {
@@ -776,7 +829,7 @@ async fn poll_loop(
             }
         }
         sh.total_records.fetch_add(1, Ordering::Relaxed);
-        if tx.send(rec).is_err() {
+        if tx.try_send(rec).is_err() {
             break;
         }
         if ok {
@@ -822,6 +875,11 @@ fn postprocess(sh: &Shared, kind: Kind, bytes: &[u8], (seq, wall): (u64, i64), c
                 g.map_gen = gen;
                 g.hud_type = hud;
             }
+            let context = if now_valid { Some(serde_json::json!([v["map_generation"], v["hud_type"], v["map_min"], v["map_max"], v["grid_zero"], v["grid_steps"]]).to_string()) } else { None };
+            let mut current = sh.map_context.lock().unwrap();
+            if *current != context { map_change = true; }
+            *current = context;
+            drop(current);
             drop(g);
             if map_change {
                 sh.map_changed.notify_one();
@@ -879,8 +937,8 @@ async fn map_img_loop(
     sh: Arc<Shared>,
     client: reqwest::Client,
     every: f64,
-    tx: mpsc::UnboundedSender<Record>,
-    up_tx: mpsc::UnboundedSender<upload::UpItem>,
+    tx: mpsc::Sender<Record>,
+    up_tx: mpsc::Sender<upload::UpItem>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut seen: HashSet<String> = HashSet::new();
@@ -898,6 +956,7 @@ async fn map_img_loop(
         }
         let epoch = sh.epoch.load(Ordering::SeqCst);
         let gen = sh.game.lock().unwrap().map_gen.clone();
+        let context = sh.map_context.lock().unwrap().clone();
         let mut urls = vec!["/map.img".to_string()];
         if notified {
             if let Some(g) = &gen {
@@ -906,9 +965,9 @@ async fn map_img_loop(
         }
         let mut map_changed = notified;
         for url in urls {
-            let wall = now_ms();
             let mono = sh.mono_ns();
             let r = fetch(&client, &sh.base(), &url, IMG_TIMEOUT).await;
+            if context != *sh.map_context.lock().unwrap() || epoch != sh.epoch.load(Ordering::SeqCst) { continue; }
             let ok = r.err.is_none() && r.status == 200 && !r.bytes.is_empty();
             let hash = if ok {
                 use sha2::Digest;
@@ -936,7 +995,7 @@ async fn map_img_loop(
                 seq: sh.next_seq(),
                 ep: if is_main { "/map.img".into() } else { "/map.img?gen".into() },
                 url: url.clone(),
-                wall_ms: wall,
+                wall_ms: now_ms(),
                 mono_ns: mono,
                 lat_us: r.lat_us,
                 status: r.status,
@@ -949,6 +1008,7 @@ async fn map_img_loop(
                 changed,
                 cfg_hz: 1.0 / every,
                 epoch,
+                map_context: context.clone(),
                 ..Default::default()
             };
             {
@@ -966,13 +1026,13 @@ async fn map_img_loop(
                 }
             }
             sh.total_records.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(rec);
+            let _ = tx.try_send(rec);
             if let Some(h) = hash {
                 // the hangar placeholder is known (gate::PLACEHOLDER_IMG_SHA256): never upload its bytes
                 if h != gate::PLACEHOLDER_IMG_SHA256 && seen.insert(h.clone()) {
                     let ext = wtc_common::sniff_image(&r.bytes);
                     let ctype = r.ctype.clone().unwrap_or_else(|| format!("image/{ext}"));
-                    let _ = up_tx.send(upload::UpItem::Image { session: sh.session.clone(), hash: h, ctype, bytes: r.bytes });
+                    let _ = up_tx.try_send(upload::UpItem::Image { session: sh.session.clone(), hash: h, ctype, bytes: r.bytes });
                 }
             }
         }
@@ -1009,7 +1069,7 @@ async fn map_img_loop(
                 };
                 set_body(&mut rec, r.bytes);
                 sh.total_records.fetch_add(1, Ordering::Relaxed);
-                let _ = tx.send(rec);
+                let _ = tx.try_send(rec);
             }
         }
     }
@@ -1018,19 +1078,22 @@ async fn map_img_loop(
 // ---------------------------------------------------------------- batching (memory only)
 
 async fn writer_loop(
-    mut rx: mpsc::UnboundedReceiver<Record>,
-    up_tx: mpsc::UnboundedSender<upload::UpItem>,
+    mut rx: mpsc::Receiver<Record>,
+    up_tx: mpsc::Sender<upload::UpItem>,
     sh: Arc<Shared>,
     mut stop: watch::Receiver<bool>,
 ) {
     let mut batch: Vec<Record> = Vec::new();
-    let mut tick = tokio::time::interval(Duration::from_millis(250));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut tick = tokio::time::interval(Duration::from_millis(50));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut gw = GateWriter::default();
     let flush = |batch: &mut Vec<Record>| {
         if !batch.is_empty() {
             sh.up.lock().unwrap().queued += 1;
-            let _ = up_tx.send(upload::UpItem::Batch(std::mem::take(batch)));
+            if let Err(e) = up_tx.try_send(upload::UpItem::Batch(std::mem::take(batch))) {
+                let n = match e.into_inner() { upload::UpItem::Batch(r) => r.len(), _ => 0 };
+                let mut u = sh.up.lock().unwrap(); u.queued -= 1; u.drop_overflow += n as u64;
+            }
         }
     };
     loop {
@@ -1039,7 +1102,7 @@ async fn writer_loop(
                 Some(r) => {
                     gw.step(&sh, &mut batch, Instant::now());
                     gw.offer(&sh, r, &mut batch);
-                    if batch.len() >= 4000 {
+                    if batch.len() >= 64 {
                         flush(&mut batch);
                     }
                 }
@@ -1375,11 +1438,13 @@ async fn send_label_once(cfg: &Cfg, id: &str, note: Option<String>, session: Opt
 
 fn new_shared(session: String, player: String, base: String) -> Shared {
     Shared {
+        ui: watch::channel(UiSnapshot::default()).0,
         session,
         player,
         start: Instant::now(),
         seq: AtomicU64::new(0),
         epoch: AtomicU32::new(0),
+        map_context: Mutex::new(None),
         last_ok_mono_ms: AtomicI64::new(-1),
         stats: Mutex::new(HashMap::new()),
         game: Mutex::new(GameState::default()),
@@ -1400,10 +1465,10 @@ fn new_shared(session: String, player: String, base: String) -> Shared {
 
 pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
     let session = format!(
-        "{}-{}-{:04x}",
+        "{}-{}-{:032x}",
         chrono::Local::now().format("%Y%m%d-%H%M%S"),
         sanitize(&cfg.player),
-        rand::random::<u16>()
+        rand::random::<u128>()
     );
 
     say!("wt-collector {VERSION}  session {session}");
@@ -1454,18 +1519,18 @@ pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
         "host": std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default(),
     });
 
-    let (tx, rx) = mpsc::unbounded_channel::<Record>();
-    let (up_tx, up_rx) = mpsc::unbounded_channel::<upload::UpItem>();
+    let (tx, rx) = mpsc::channel::<Record>(128);
+    let (up_tx, up_rx) = mpsc::channel::<upload::UpItem>(16);
     let (stop_tx, stop_rx) = watch::channel(false);
 
     for n in &cfg.notes {
-        let _ = tx.send(sh.synthetic("#note", n.clone()));
+        let _ = tx.try_send(sh.synthetic("#note", n.clone()));
     }
 
     let local_client = local_client()?;
 
     let uploader = tokio::spawn(upload::uploader_loop(cfg.clone(), sh.clone(), up_rx));
-    let labeler = tokio::spawn(upload::label_loop(cfg.clone(), sh.clone(), stop_rx.clone()));
+    // Live operation has no label/archive retry worker.
     let (wstop_tx, wstop_rx) = watch::channel(false);
     let writer = tokio::spawn(writer_loop(rx, up_tx.clone(), sh.clone(), wstop_rx));
     tokio::spawn(clock::sync_loop(cfg.clone(), sh.clone(), tx.clone(), Some(meta.to_string()), stop_rx.clone()));
@@ -1491,6 +1556,7 @@ pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
         up_tx.clone(),
         stop_rx.clone(),
     )));
+    tokio::spawn(ui_snapshot_loop(sh.clone(), stop_rx.clone()));
     let status = tokio::spawn(status_loop(sh.clone(), stop_rx.clone()));
     {
         // re-probe when the current base keeps failing (port can change between game launches)
@@ -1519,7 +1585,7 @@ pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
                         say!("  [game] API now at {} (was {})", game::short(&b), game::short(&old));
                     }
                     let pj: Vec<serde_json::Value> = res.iter().map(|(c, r)| serde_json::json!({"base": c, "ok": r.is_ok(), "result": match r { Ok(s) | Err(s) => s }})).collect();
-                    let _ = tx.send(sh.synthetic("#game", serde_json::json!({"base": b, "previous": old, "probe": pj}).to_string()));
+                    let _ = tx.try_send(sh.synthetic("#game", serde_json::json!({"base": b, "previous": old, "probe": pj}).to_string()));
                 }
             }
         });
@@ -1534,7 +1600,7 @@ pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
             loop {
                 let v = presets[i % presets.len()];
                 sh.set_fast(v);
-                let _ = tx.send(sh.synthetic("#note", format!("rate preset {v} Hz (map_obj/indicators/state) [auto cycle]")));
+                let _ = tx.try_send(sh.synthetic("#note", format!("rate preset {v} Hz (map_obj/indicators/state) [auto cycle]")));
                 say!("  [rate-cycle] fast group now {v} Hz");
                 i += 1;
                 tokio::select! {
@@ -1560,10 +1626,10 @@ pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
                         let t = line.trim();
                         if let Some(v) = t.strip_prefix("/rate ").and_then(|v| v.trim().parse::<f64>().ok()) {
                             sh.set_fast(v);
-                            let _ = tx.send(sh.synthetic("#note", format!("rate preset {v} Hz (map_obj/indicators/state)")));
+                            let _ = tx.try_send(sh.synthetic("#note", format!("rate preset {v} Hz (map_obj/indicators/state)")));
                             say!("  [rate] fast group now {v} Hz (note recorded)");
                         } else if !t.is_empty() {
-                            if tx.send(sh.synthetic("#note", t.to_string())).is_err() {
+                            if tx.try_send(sh.synthetic("#note", t.to_string())).is_err() {
                                 break;
                             }
                             say!("  [note recorded] {t}");
@@ -1586,7 +1652,7 @@ pub async fn run(cfg: Cfg, ui: Option<UiLink>) -> Result<()> {
     let _ = wstop_tx.send(true);
     let _ = tokio::time::timeout(Duration::from_secs(10), writer).await;
     let _ = tokio::time::timeout(Duration::from_secs(7), uploader).await;
-    let _ = tokio::time::timeout(Duration::from_secs(7), labeler).await;
+
     say!("{}", status_line(&sh));
     say!("done.");
     Ok(())

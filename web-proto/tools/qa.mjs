@@ -1,90 +1,21 @@
-// Headless QA: screenshots + no-scroll + square-map checks.  node tools/qa.mjs [baseUrl]
 import { chromium } from 'playwright-core';
+import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
 const BASE = process.argv[2] || 'http://127.0.0.1:4180/';
-const OUT = 'shots/';
-const browser = await chromium.launch({ executablePath: '/usr/bin/google-chrome', args: ['--no-sandbox', '--force-color-profile=srgb'] });
-const results = [];
-async function check(page, name) {
-  const r = await page.evaluate(() => {
-    const se = document.scrollingElement;
-    const maps = [...document.querySelectorAll('.mapview')].map((m) => { const b = m.getBoundingClientRect(); return { w: b.width, h: b.height, x: b.x, y: b.y, r: b.right, b: b.bottom }; });
-    const over = [...document.querySelectorAll('.app *')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > innerWidth + 0.5 || b.bottom > innerHeight + 0.5 || b.left < -0.5 || b.top < -0.5) && !e.closest('.mapview'); }).map((e) => e.className && e.className.baseVal === undefined ? e.className : e.tagName).slice(0, 5);
-    const tools = document.querySelector('.tools'); const opts = document.querySelector('.opts');
-    return { vw: innerWidth, vh: innerHeight, sw: se.scrollWidth, sh: se.scrollHeight, maps, over, layout: document.querySelector('.main')?.dataset.layout,
-      optsOverflow: opts ? opts.scrollHeight - opts.clientHeight : 0, tools: tools ? tools.getBoundingClientRect().toJSON() : null };
-  });
-  const noScroll = r.sw <= r.vw && r.sh <= r.vh;
-  const square = r.maps.every((m) => Math.abs(m.w - m.h) <= 1);
-  const inside = r.maps.every((m) => m.r <= r.vw + 0.5 && m.b <= r.vh + 0.5);
-  results.push({ name, ...r, noScroll, square, inside });
-  console.log(`${noScroll && square && inside && !r.over.length ? 'OK ' : 'BAD'} ${name.padEnd(34)} ${r.vw}x${r.vh} layout=${r.layout} scroll=${r.sw}x${r.sh} maps=${r.maps.map((m) => `${m.w}x${m.h}`).join(',')} optsOverflow=${r.optsOverflow} over=${JSON.stringify(r.over)}`);
+mkdirSync('shots', { recursive: true });
+const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true });
+const results = [], errors = [];
+for (const [width,height,dpr] of [[1440,900,1],[1280,720,1.5],[1536,864,2],[390,844,3],[844,390,2],[320,568,2]]) for (const mode of ['ground','air','dual']) {
+  const name = `${width}x${height}_${mode}_${dpr}`, ctx = await browser.newContext({ viewport:{width,height}, deviceScaleFactor:dpr, hasTouch:width<900 });
+  const p = await ctx.newPage(); p.on('pageerror',e=>errors.push(`${name}: ${e.message}`));
+  await p.goto(`${BASE}?demo=1&fresh=1&collab=0&mode=${mode}`,{waitUntil:'networkidle'}); await p.waitForTimeout(500);
+  const layout = await p.evaluate(()=>{ const se=document.scrollingElement;return { noScroll:se.scrollWidth<=innerWidth&&se.scrollHeight<=innerHeight,maps:[...document.querySelectorAll('.mapview')].map(m=>m.getBoundingClientRect().toJSON()),badTargets:[...document.querySelectorAll('button')].filter(b=>{ const r=b.getBoundingClientRect();return r.height>0&&(r.width<43.5||r.height<43.5); }).map(b=>b.getAttribute('aria-label')||b.textContent),canvases:document.querySelectorAll('canvas.layer').length,details:!!document.querySelector('.details') }; });
+  assert.ok(layout.noScroll,name);assert.equal(layout.canvases,mode==='dual'?8:4);assert.equal(layout.details,false);assert.deepEqual(layout.badTargets,[],`${name} targets`);
+  layout.maps.forEach(r=>{assert.ok(r.width>100&&r.height>100);assert.ok(r.right<=width+1&&r.bottom<=height+1);});
+  const projection=await p.evaluate(async()=>{const {transform,zoomAt}=window.__wtQA.viewport;const v={cx:.51,cy:.47,z:1.9},p=[103,179],t=transform('ground',640,380,v,1.7),n=t.screenToNorm(p),z=zoomAt('ground',640,380,v,p,1.5,1.7),a=transform('ground',640,380,z,1.7).normToScreen(n);return {error:Math.hypot(a[0]-p[0],a[1]-p[1]),world:t.screenToWorld(t.worldToScreen([1500,1900]))};});
+  assert.ok(projection.error<1e-6);assert.deepEqual(projection.world.map(Math.round),[1500,1900]);
+  if(mode==='dual') {const before=await p.evaluate(async()=>structuredClone((window.__wtQA.store).getState().views));await p.locator('[data-map=air] [aria-label=放大]').click();const after=await p.evaluate(async()=>{const s=(window.__wtQA.store).getState();return {views:structuredClone(s.views),active:s.activeMap};});assert.deepEqual(after.views.ground,before.ground);assert.notDeepEqual(after.views.air,before.air);assert.equal(after.active,'air');}
+  if(mode==='ground') {await p.locator('[data-tool=point]').click();await p.waitForTimeout(150);const r=await p.locator('.mapview').boundingBox(),x=r.x+r.width*.3,y=r.y+r.height*.35;await p.mouse.click(x,y);const d=await p.evaluate(async()=>(window.__wtQA.store).getState().drawings.at(-1));assert.equal(d.kind,'point');assert.equal(d.scope,'ground');await p.locator('[aria-label=关闭详情]').click();await p.keyboard.press('v');await p.waitForTimeout(150);const click=await p.evaluate(async d=>{const {getState}=window.__wtQA.store,{transform,defaultView}=window.__wtQA.viewport;const el=document.querySelector('.mapview'),r=el.getBoundingClientRect(),s=getState();const pos=transform('ground',r.width,r.height,s.views.ground??defaultView('ground')).worldToScreen(d.pts[0]);return [r.x+pos[0],r.y+pos[1]];},d);await p.mouse.click(...click);const sel=await p.evaluate(async()=>(window.__wtQA.store).getState().selectedId);assert.equal(sel,d.id,'shared hit projection');await p.keyboard.press('m');await p.locator('[aria-label=关闭详情]').click();await p.mouse.click(r.x+r.width*.2,r.y+r.height*.5);await p.mouse.click(r.x+r.width*.6,r.y+r.height*.5);const metres=await p.evaluate(async()=>{const s=(window.__wtQA.store).getState(),{measure}=window.__wtQA.renderer;return measure(s.ruler.map,s.ruler.pts[0],s.ruler.pts[1]);});assert.ok(metres>0&&Number.isFinite(metres));}
+  await p.screenshot({path:`shots/${name}.png`});results.push({name,...layout,projection,metrics:await p.evaluate(()=>window.__wtRenderMetrics)});console.log(`PASS ${name}`);await ctx.close();
 }
-async function shot(name, vp, q, fn) {
-  const ctx = await browser.newContext({ viewport: vp, deviceScaleFactor: vp.dsf ?? (vp.width < 900 ? 2 : 1), hasTouch: !!vp.touch, isMobile: !!vp.touch });
-  const page = await ctx.newPage();
-  page.on('pageerror', (e) => console.log('PAGEERROR', name, e.message));
-  page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE', name, m.text()); });
-  await page.goto(BASE + '?demo=1&fresh=1&' + q, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(2600);
-  if (fn) await fn(page);
-  await check(page, name);
-  await page.screenshot({ path: OUT + name + '.png' });
-  await ctx.close();
-}
-const tapMap = async (page, fx, fy, sel = '.mapview .hit') => {
-  const b = await page.locator(sel).first().boundingBox();
-  await page.mouse.click(b.x + b.width * fx, b.y + b.height * fy);
-  await page.waitForTimeout(120);
-};
-const only = process.argv[3];
-const jobs = [
-  ['390x844_single_command', { width: 390, height: 844, touch: true }, 'mode=ground&ui=command'],
-  ['390x844_single_member', { width: 390, height: 844, touch: true }, 'mode=ground&ui=member'],
-  ['390x844_dual', { width: 390, height: 844, touch: true }, 'mode=dual&ui=member'],
-  ['844x390_single_command', { width: 844, height: 390, touch: true }, 'mode=ground&ui=command'],
-  ['844x390_dual', { width: 844, height: 390, touch: true }, 'mode=dual'],
-  ['320x568_single_command', { width: 320, height: 568, touch: true }, 'mode=ground&ui=command'],
-  ['320x568_dual', { width: 320, height: 568, touch: true }, 'mode=dual'],
-  ['1280x720_single_command', { width: 1280, height: 720 }, 'mode=ground&ui=command'],
-  ['1536x698_single_member', { width: 1536, height: 698 }, 'mode=air&ui=member'],
-  ['1440x900_single_command', { width: 1440, height: 900 }, 'mode=ground&ui=command&policy=team_visible'],
-  ['1440x900_single_member', { width: 1440, height: 900 }, 'mode=ground&ui=member'],
-  ['1440x900_air_command_fused', { width: 1440, height: 900 }, 'mode=air&ui=command&policy=fused', async (p) => { await p.waitForTimeout(19000); }],
-  ['1440x900_ground_fused_reveals', { width: 1440, height: 900 }, 'mode=ground&ui=command&policy=fused&collab=0', async (p) => { await p.waitForTimeout(27700); }],
-  ['390x844_ground_fused_zoom', { width: 390, height: 844, touch: true }, 'mode=ground&ui=member&policy=fused&collab=0', async (p) => {
-    await p.waitForTimeout(26500); await p.click('[aria-label=放大]'); await p.waitForTimeout(300);
-  }],
-  ['390x844_collab_toast', { width: 390, height: 844, touch: true }, 'mode=ground&ui=command', async (p) => { await p.waitForSelector('.toast', { timeout: 20000 }); await p.waitForTimeout(250); }],
-  ['1280x720_stale_indicator', { width: 1280, height: 720 }, 'mode=dual&ui=command&collab=0', async (p) => { await p.waitForSelector('.conn.stale', { timeout: 40000 }); await p.waitForTimeout(900); }],
-  ['1440x900_dual_command', { width: 1440, height: 900 }, 'mode=dual&ui=command&policy=fused'],
-  ['1440x900_dual_member', { width: 1440, height: 900 }, 'mode=dual&ui=member&policy=off'],
-  ['1440x900_drawing_route', { width: 1440, height: 900 }, 'mode=ground&ui=command&collab=0', async (p) => {
-    await p.click('[data-tool=route]'); await p.click('text=进攻箭头');
-    await tapMap(p, 0.30, 0.40); await tapMap(p, 0.42, 0.33); await tapMap(p, 0.55, 0.36);
-    const b = await p.locator('.mapview .hit').boundingBox(); await p.mouse.move(b.x + b.width * 0.66, b.y + b.height * 0.30);
-    await p.waitForTimeout(200);
-  }],
-  ['390x844_drawing_source', { width: 390, height: 844, touch: true }, 'mode=ground&ui=command&collab=0', async (p) => {
-    await p.click('[data-tool=source]'); await tapMap(p, 0.40, 0.55);
-  }],
-  ['1440x900_select_editor', { width: 1440, height: 900 }, 'mode=ground&ui=command&collab=0', async (p) => {
-    await p.click('[data-tool=select]');
-    // seeded rally point at ground norm (0.402,0.553)
-    const v = await p.evaluate(() => JSON.parse(localStorage.getItem('wt-tactical-proto-v1') || '{}').views);
-    await p.waitForTimeout(400);
-    const pos = await p.evaluate(() => { const b = document.querySelector('.mapview').getBoundingClientRect(); return b; });
-    // default view = fit grid box: box x0=0.371 w=0.3906 → norm→screen
-    const z = 1 / (0.390625 * 1.06), cx = 0.371 + 0.1953, cy = 0.3903 + 0.1953;
-    const sx = (0.402 - cx) * pos.width * z + pos.width / 2, sy = (0.553 - cy) * pos.width * z + pos.width / 2;
-    await p.mouse.click(pos.x + sx, pos.y + sy); await p.waitForTimeout(300);
-  }],
-  ['1440x900_settings_sheet', { width: 1440, height: 900 }, 'mode=ground&ui=command&collab=0', async (p) => { await p.click('.conn'); await p.waitForTimeout(300); }],
-  ['390x844_point_tool_member', { width: 390, height: 844, touch: true }, 'mode=ground&ui=member&collab=0', async (p) => { await p.click('[data-tool=point]'); await p.click('[aria-label=敌军]'); await tapMap(p, 0.62, 0.42); }],
-  ['1440x900_ruler', { width: 1440, height: 900 }, 'mode=ground&ui=command&collab=0', async (p) => {
-    await p.click('[data-tool=ruler]'); await tapMap(p, 0.12, 0.45); await tapMap(p, 0.4, 0.42); await tapMap(p, 0.7, 0.5);
-  }],
-];
-for (const [name, vp, q, fn] of jobs) { if (only && !name.includes(only)) continue; await shot(name, vp, q, fn); }
-await browser.close();
-const bad = results.filter((r) => !(r.noScroll && r.square && r.inside && !r.over.length));
-console.log(bad.length ? `FAILURES: ${bad.length}` : 'ALL CHECKS PASSED');
+assert.deepEqual(errors,[]);writeFileSync('shots/qa-result.json',JSON.stringify(results,null,2));await browser.close();console.log(`PASS ${results.length} viewport/DPI variants, projections, hit testing, touch targets`);

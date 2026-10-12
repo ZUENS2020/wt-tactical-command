@@ -1,0 +1,80 @@
+{
+  "source": "War Thunder built-in tactical map HTTP assets",
+  "verified_date": "2026-10-11",
+  "font_url": "http://127.0.0.1:8111/icons.ttf",
+  "page_url": "http://127.0.0.1:8111/",
+  "font_sha256": "22217443317decb152e06a4cc31be6e767a21ee18edaa7d8b4b143645b5c2704",
+  "page_sha256": "e466441e98191cb115d545115e77c32f437335d8cbe64e7715ff69cb3d1fefb1",
+  "mapping": {
+    "Assault": "A",
+    "Bomber": "B",
+    "Fighter": "F",
+    "LightTank": "L",
+    "MediumTank": "M",
+    "TankDestroyer": "T",
+    "Tracked": "T",
+    "Wheeled": "W",
+    "SPAA": "S",
+    "SAM": "S",
+    "Airdefence": "4",
+    "Structure": "5"
+  },
+  "unavailable": {
+    "HeavyTank": "Native H glyph is empty",
+    "Helicopter": "Native H glyph is empty",
+    "naval": "No verified native category mapping"
+  },
+  "fallback": "Neutral symbol with the received category label; never substitute a silhouette or guess a class",
+  "files": [
+    {
+      "file": "glyph_4.svg",
+      "glyph": "4",
+      "sha256": "f16c60a0c400771fa66ca3f21538dbe6bbb77e9ca26fa33650d197d557f2357e"
+    },
+    {
+      "file": "glyph_5.svg",
+      "glyph": "5",
+      "sha256": "364f683afd4205d8b0ff4d2dd78e929a2b0008448e47c66ddbb14a3b84de264f"
+    },
+    {
+      "file": "glyph_A.svg",
+      "glyph": "A",
+      "sha256": "16f3de7eca29e295a9fac7a6faf9eaf43e70d197d0cb301056c567721959e6e2"
+    },
+    {
+      "file": "glyph_B.svg",
+      "glyph": "B",
+      "sha256": "14f8c5ce832eadb368b9be111e5cc4fde90aeed086311469440834427d91ff27"
+    },
+    {
+      "file": "glyph_F.svg",
+      "glyph": "F",
+      "sha256": "a833d4f809d6bd7fdfe3d8533dc46d8b51682b3bc12473fa248ce91b8a06cdc9"
+    },
+    {
+      "file": "glyph_L.svg",
+      "glyph": "L",
+      "sha256": "3d838e5253ef6ea9bec056691dd07e68edb05c38a4b27b4aeb53a57490ffd224"
+    },
+    {
+      "file": "glyph_M.svg",
+      "glyph": "M",
+      "sha256": "0b2979a10cb733b72a73708de88d801f08f3ce97e2fcf2f31089cab4d62adc9a"
+    },
+    {
+      "file": "glyph_S.svg",
+      "glyph": "S",
+      "sha256": "ee26b8064880aed73b78c189e42a7df1c5c1b5cf39c03938c0a37f43bdfa1957"
+    },
+    {
+      "file": "glyph_T.svg",
+      "glyph": "T",
+      "sha256": "ee38910d3c651ef7110eb07faab6b01f08b6bf40244cfd80c9f9cfdbfe1e886a"
+    },
+    {
+      "file": "glyph_W.svg",
+      "glyph": "W",
+      "sha256": "4e299b53d0bf64ad30a0dfae64f84f6792d468de05660263248188567e2062aa"
+    }
+  ]
+}

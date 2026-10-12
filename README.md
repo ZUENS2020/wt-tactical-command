@@ -1,15 +1,19 @@
 # WT Tactical Command（内部）
 
-War Thunder 战术指挥系统源码仓库：8111 数据采集端、接收服务器、数据分析、战术 Web 地图原型，以及规划与调研文档。
+War Thunder 战术指挥系统源码仓库：8111 数据采集端、接收服务器、数据分析、Canvas 战术 Web 地图，以及规划与调研文档。
 
 > 私有仓库，仅内部使用。不含任何录制数据、二进制、token / 密钥。
+
+当前规则：实时观测超过 **2 秒**直接丢弃，不归档、不补传、不复盘；静态底图、地图元数据及房间标绘保留。旧历史文件保留。
+
+实施与协议见 [docs/REALTIME_V2.md](docs/REALTIME_V2.md)，验收见 [docs/ACCEPTANCE_V2.md](docs/ACCEPTANCE_V2.md)。
 
 ## 目录结构
 
 | 路径 | 内容 |
 |---|---|
 | `wt-collect/` | Rust workspace（`common` / `collector` / `receiver` / `analyzer`），另含 `mock/`（8111 模拟器、延迟代理）、`deploy/`（HK 服务器部署脚本与 systemd/Caddy 配置）、`scripts/`（本地 receiver 管理、e2e 测试）、`test/`（测试脚本）、`dist/pkg/`（Windows 发行包模板） |
-| `web-proto/` | 战术 Web 地图原型（Vite + React + TypeScript + milsymbol），`src/data/` 为回放/符号数据，`shots/` 为各分辨率截图，`tools/` 为数据提取脚本 |
+| `web-proto/` | Canvas 战术 Web 地图（Vite + React + TypeScript + Canvas 2D），`src/data/` 为回放/符号数据，`shots/` 为各分辨率截图，`tools/` 为数据提取脚本 |
 | `analysis/` | Python 分析模块（`analyze.py`、`enemy/` 敌方标记跟踪及测试、绘图）与分析报告 `*.md`、结果 JSON、图表 |
 | `docs/plan/` | 方案文档（v1.1 / v1.2 的 md / html / pdf）、8111 API 规格、文档构建脚本 `build/` |
 | `docs/research/` | 调研笔记与截图；第三方参考项目见 [`REFERENCES.md`](docs/research/REFERENCES.md)（未纳入仓库） |
@@ -18,11 +22,11 @@ War Thunder 战术指挥系统源码仓库：8111 数据采集端、接收服务
 
 ## 组件
 
-- **wt-collector**（Windows 采集端）：轮询游戏本地接口 `127.0.0.1:8111`（新版客户端可能为 9222，`game_port = "auto"` 自动探测），按端点采样率采集 `map_obj` / `indicators` / `state` / `map_info` / `mission` / `hudmsg` / `gamechat` 和地图图片，gzip 批量上传到接收端；0.1.5 起不落盘，带服务器时钟同步。
-- **wt-receiver**（axum）：`POST /api/ingest`、`/api/image`、`/api/note`（Bearer token），`GET /api/status`、`/api/time`、`/healthz`、状态页 `/`；按 (session, seq) 去重、容量保护（507）、海战信息过滤、时钟守卫。
+- **wt-collector**（Windows 采集端）：轮询游戏本地接口 `127.0.0.1:8111`（新版客户端可能为 9222，`game_port = "auto"` 自动探测），按端点采样率采集 `map_obj` / `indicators` / `state` / `map_info` / `mission` / `hudmsg` / `gamechat` 和地图图片，仅发送各端点最新有效样本；2.0.0 使用稳定设备身份、独立地图上传通道和服务器时钟同步。
+- **wt-receiver**（axum）：`POST /api/ingest`、`/api/image`（Bearer token），`GET /api/status`、`/api/time`、`/healthz`、状态页 `/`；每端点采样水位、2 秒期限、地图上下文校验、单房间状态任务和共享标绘版本校验。
 - **wt-analyze**：对会话生成 `report.md` 与各类 CSV。
 - **analysis/**：真实数据分析、敌方标记识别与轨迹（Python）。
-- **web-proto/**：指挥 / 成员视图的战术地图原型（绘图、NATO 符号、回放模拟）。
+- **web-proto/**：《武装突击 3》地图风格的独立陆空双图，战争雷霆原生地图符号、金色本人标记、标绘和多人实时协作。
 
 详细说明见 [`wt-collect/README.md`](wt-collect/README.md)。
 
@@ -42,7 +46,7 @@ cargo build --release -p wt-collector --target x86_64-pc-windows-gnu
 deploy/package.sh https://wt.zuens2020.top   # 生成 dist/wt-collector-win64.zip
 ```
 
-注意：`dist/pkg/wt-collector.tmpl.toml` 中 token 在仓库里为占位符 `CHANGE_ME_WT_TOKEN`，打包前请替换为服务器 `WT_TOKEN`（不要提交真实值）。脚本中工作目录写死为 `/workspace/wt-collect`，在其他位置使用需调整。
+打包支持显式传入 exe 路径：`deploy/package.sh https://wt.zuens2020.top /path/to/wt-collector.exe`。token 通过 `WT_PACKAGE_TOKEN_FILE` 指向的文件注入；没有此变量时保留占位符。不要修改仓库模板或提交真实口令。
 
 ## 部署接收端（HK 服务器，https://wt.zuens2020.top）
 

@@ -1,14 +1,18 @@
 import { getState, setState, toast, newId, type Drawing, type Tool, type ViewMode, type State } from './store';
 import { battleTime, getSnapshot } from './data';
-import { gridRef, type MapId, type V2 } from './geo';
+import { MAPS, gridRef, type MapId, type V2 } from './geo';
 import { CAT_LABEL } from './symbols';
 import { DEMO } from './mode';
-import { cfg, syncPut, syncDel, onRemote } from './live';
+import { cfg, syncPut, syncDel, onRemote, canEdit } from './live';
 
 let ME = DEMO ? '朔风' : cfg.nick();
 export function refreshNick() { if (!DEMO) ME = cfg.nick(); }
 export function myName() { return ME; }
 const live = !DEMO;
+function editAllowed(id?: string) {
+  if (!live || canEdit(id)) return true;
+  toast('同步尚未就绪，请稍后编辑', { tone: 'warn' }); return false;
+}
 const mapOf = (d: Drawing): MapId => (d.scope === 'air' ? 'air' : 'ground');
 onRemote((k, d) => {
   if (k === 'add') toast(`${d.by || '队友'} 添加了${kindName(d)} · ${gridRef(mapOf(d), d.pts[0])}`, { tone: 'sync' });
@@ -32,11 +36,12 @@ export function kindName(d: Drawing) {
 
 export function setMode(mode: ViewMode) {
   const s = getState();
-  setState({ mode, lastSingle: mode === 'dual' ? s.lastSingle : mode, draft: null, moving: false });
+  setState({ mode, activeMap: mode === 'dual' ? s.activeMap : mode, lastSingle: mode === 'dual' ? s.lastSingle : mode, draft: null, moving: false });
 }
 
 export function selectTool(tool: Tool) {
   const s = getState();
+  setState({ panelOpen: tool !== 'select', selectedUnit: null });
   if (tool === 'layers') { setState({ tool: s.tool === 'layers' ? 'select' : 'layers', draft: null, moving: false }); return; }
   setState({ tool, draft: null, moving: false, selectedId: tool === 'select' ? s.selectedId : null, ruler: tool === 'ruler' ? s.ruler : s.ruler });
 }
@@ -46,7 +51,9 @@ function pushUndo(op: State['undo'][number]) {
 }
 
 export function addDrawing(d: Omit<Drawing, 'id' | 'v' | 't' | 'by' | 'scope'> & Partial<Drawing>, by = ME, silent = false) {
-  const full: Drawing = { id: newId(), v: 1, t: battleTime(), by, scope: 'both', ...d } as Drawing;
+  const full: Drawing = { id: newId(), v: 1, t: battleTime(), by, scope: getState().activeMap, ...d } as Drawing;
+  full.map_context = MAPS[mapOf(full)].context;
+  if (live && by === ME && !editAllowed()) return full;
   setState((s) => ({ drawings: [...s.drawings, full] }));
   if (by === ME) pushUndo({ kind: 'add', after: full });
   if (live && by === ME) syncPut(full);
@@ -57,7 +64,7 @@ export function addDrawing(d: Omit<Drawing, 'id' | 'v' | 't' | 'by' | 'scope'> &
 export function updateDrawing(id: string, patch: Partial<Drawing>, record = true) {
   const s = getState();
   const before = s.drawings.find((d) => d.id === id);
-  if (!before) return;
+  if (!before || !editAllowed(id)) return;
   const after = { ...before, ...patch, v: before.v + 1 };
   setState({ drawings: s.drawings.map((d) => (d.id === id ? after : d)) });
   if (record) pushUndo({ kind: 'upd', before, after });
@@ -67,9 +74,9 @@ export function updateDrawing(id: string, patch: Partial<Drawing>, record = true
 export function deleteDrawing(id: string, by = ME) {
   const s = getState();
   const before = s.drawings.find((d) => d.id === id);
-  if (!before) return;
+  if (!before || !editAllowed(id)) return;
   setState({ drawings: s.drawings.filter((d) => d.id !== id), selectedId: s.selectedId === id ? null : s.selectedId, moving: false });
-  if (live && by === ME) syncDel(id, ME);
+  if (live && by === ME) syncDel(id, ME, before.sv);
   if (by === ME) { pushUndo({ kind: 'del', before }); toast(`已删除${kindName(before)}`, { undo: true }); }
 }
 
@@ -77,11 +84,15 @@ export function undo() {
   const s = getState();
   const op = s.undo[s.undo.length - 1];
   if (!op) { toast('没有可撤销的操作'); return; }
+  const id = op.after?.id ?? op.before?.id;
+  if (!editAllowed(id)) return;
+  const current = s.drawings.find(d => d.id === id);
+  if (live && op.kind !== 'del' && current?.sv !== op.after?.sv) { toast('该标绘已被队友修改，无法撤销', { tone: 'warn' }); return; }
   setState({ undo: s.undo.slice(0, -1) });
   const ds = getState().drawings;
   if (op.kind === 'add' && op.after) { setState({ drawings: ds.filter((d) => d.id !== op.after!.id), selectedId: null }); if (live) syncDel(op.after.id, ME); }
   if (op.kind === 'del' && op.before) { setState({ drawings: [...ds, op.before] }); if (live) syncPut(op.before); }
-  if (op.kind === 'upd' && op.before) { setState({ drawings: ds.map((d) => (d.id === op.before!.id ? op.before! : d)) }); if (live) syncPut(op.before); }
+  if (op.kind === 'upd' && op.before) { setState({ drawings: ds.map((d) => (d.id === op.before!.id ? op.before! : d)) }); if (live) syncPut({ ...op.before, sv: current?.sv }); }
   toast('已撤销');
 }
 
@@ -96,12 +107,12 @@ export function undoPoint() {
 export function finishDraft() {
   const s = getState();
   const d = s.draft;
-  if (!d) return;
+  if (!d || !editAllowed()) return;
   if (s.tool === 'route') {
     if (d.pts.length < 2) { toast('至少需要两个点'); return; }
     const kind = s.routeType;
     const nPhase = s.drawings.filter((x) => x.kind === 'phase').length;
-    addDrawing({ kind, scope: live ? d.map : 'both', pts: d.pts, label: kind === 'phase' ? PL_NAMES[nPhase % PL_NAMES.length] : '', status: s.newStatus, showTime: false, smooth: kind !== 'phase' && s.smooth });
+    addDrawing({ kind, scope: d.map, pts: d.pts, label: kind === 'phase' ? PL_NAMES[nPhase % PL_NAMES.length] : '', status: s.newStatus, showTime: false, smooth: kind !== 'phase' && s.smooth });
     setState({ draft: null });
   }
 }
@@ -109,6 +120,7 @@ export function finishDraft() {
 /** a tap (not a drag) on the map. hitId = topmost drawing under the finger. */
 export function tapMap(map: MapId, w: V2, hitId: string | null, dbl = false) {
   const s = getState();
+  if (s.tool !== 'select' && s.tool !== 'layers' && s.tool !== 'ruler' && !editAllowed()) return;
   switch (s.tool) {
     case 'select':
     case 'layers': {
@@ -124,17 +136,17 @@ export function tapMap(map: MapId, w: V2, hitId: string | null, dbl = false) {
         return;
       }
       if (hitId && s.layers.lockDrawings) { toast('标绘图层已锁定（图层 → 解锁）'); return; }
-      setState({ selectedId: hitId, showMore: false, tool: hitId && s.tool === 'layers' ? 'select' : s.tool });
+      setState({ selectedId: hitId, panelOpen: !!hitId, selectedUnit: null, showMore: false, tool: hitId && s.tool === 'layers' ? 'select' : s.tool });
       return;
     }
     case 'point': {
       const cat = s.pointCat;
-      const d = addDrawing({ kind: 'point', scope: live ? map : 'both', cat, pts: [w], label: '', status: s.newStatus, showTime: cat === 'enemy' || cat === 'danger' });
+      const d = addDrawing({ kind: 'point', scope: map, cat, pts: [w], label: '', status: s.newStatus, showTime: cat === 'enemy' || cat === 'danger' });
       setState({ selectedId: d.id });
       return;
     }
     case 'route': {
-      const pts = s.draft ? s.draft.pts : [];
+      const pts = s.draft?.map === map ? s.draft.pts : [];
       if (dbl && pts.length >= 2) { finishDraft(); return; }
       // tapping the last point again finishes
       setState({ draft: { tool: 'route', map, pts: [...pts, w] } });
@@ -144,16 +156,16 @@ export function tapMap(map: MapId, w: V2, hitId: string | null, dbl = false) {
       if (!s.draft) { setState({ draft: { tool: 'area', map, pts: [w] } }); return; }
       const p0 = s.draft.pts[0];
       if (s.areaShape === 'rect') {
-        addDrawing({ kind: 'area', scope: live ? map : 'both', areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
+        addDrawing({ kind: 'area', scope: map, areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
       } else {
-        addDrawing({ kind: 'circle', scope: live ? map : 'both', areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
+        addDrawing({ kind: 'circle', scope: map, areaType: s.areaType, pts: [p0, w], label: AREA_LABEL[s.areaType], status: s.newStatus, showTime: false });
       }
       setState({ draft: null });
       return;
     }
     case 'source': {
       if (!s.draft) { setState({ draft: { tool: 'source', map, pts: [w] } }); return; }
-      addDrawing({ kind: 'source', scope: live ? map : 'both', pts: [s.draft.pts[0], w], sector: s.sourceSector, label: '未确认', status: 'present', showTime: true });
+      addDrawing({ kind: 'source', scope: map, pts: [s.draft.pts[0], w], sector: s.sourceSector, label: '未确认', status: 'present', showTime: true });
       setState({ draft: null });
       return;
     }
@@ -176,7 +188,7 @@ export function seedIfEmpty() {
   if (live) return;
   const s = getState();
   if (s.drawings.length) return;
-  const mk = (d: Partial<Drawing>): Drawing => ({ id: newId(), v: 1, t: 340, by: '死神', scope: 'both', label: '', status: 'present', showTime: false, pts: [], kind: 'point', ...d } as Drawing);
+  const mk = (d: Partial<Drawing>): Drawing => ({ id: newId(), v: 1, t: 340, by: '死神', scope: 'ground', label: '', status: 'present', showTime: false, pts: [], kind: 'point', ...d } as Drawing);
   setState({
     drawings: [
       mk({ kind: 'point', cat: 'rally', pts: [g(0.402, 0.553)], label: '集合 A', t: 301 }),
@@ -211,19 +223,19 @@ function collabAction() {
     const tgt = cont[2]?.w ?? g(0.57, 0.55);
     const a = sishen.w;
     const mid: V2 = [(a[0] + tgt[0]) / 2 + 60, (a[1] + tgt[1]) / 2 - 90];
-    const d = addDrawing({ kind: 'route', pts: [a, mid, [tgt[0] - 50, tgt[1] + 30]], label: '', status: 'planned', showTime: false }, '死神');
+    const d = addDrawing({ kind: 'route', scope: 'ground', pts: [a, mid, [tgt[0] - 50, tgt[1] + 30]], label: '', status: 'planned', showTime: false }, '死神');
     toast(`死神 添加了进攻路线 · ${gridRef('ground', d.pts[2])}`, { tone: 'sync' });
   } else if (step === 1) {
     const c = cont[Math.floor(Math.random() * cont.length)];
     const p: V2 = c ? [c.w[0] + 18, c.w[1] - 12] : g(0.6, 0.6);
-    const d = addDrawing({ kind: 'point', cat: 'enemy', pts: [p], label: '', status: 'present', showTime: true }, '夜枭');
+    const d = addDrawing({ kind: 'point', scope: 'ground', cat: 'enemy', pts: [p], label: '', status: 'present', showTime: true }, '夜枭');
     toast(`夜枭 标记了敌军 · ${gridRef('ground', d.pts[0])}`, { tone: 'sync' });
   } else if (step === 2) {
-    const d = addDrawing({ kind: 'area', areaType: 'airstrike', pts: [g(0.592, 0.515), g(0.632, 0.56)], label: '空袭区', status: 'planned', showTime: false }, '死神');
+    const d = addDrawing({ kind: 'area', scope: 'ground', areaType: 'airstrike', pts: [g(0.592, 0.515), g(0.632, 0.56)], label: '空袭区', status: 'planned', showTime: false }, '死神');
     toast(`死神 添加了空袭区 · ${gridRef('ground', d.pts[0])}`, { tone: 'sync' });
   } else if (step === 3 && tiezhen) {
     const p = tiezhen.w;
-    const d = addDrawing({ kind: 'source', pts: [p, [p[0] + 520, p[1] - 160]], sector: 30, label: '未确认', status: 'present', showTime: true }, '铁砧');
+    const d = addDrawing({ kind: 'source', scope: 'ground', pts: [p, [p[0] + 520, p[1] - 160]], sector: 30, label: '未确认', status: 'present', showTime: true }, '铁砧');
     toast(`铁砧 报告了攻击来源 · ${gridRef('ground', d.pts[0])}`, { tone: 'warn' });
   } else {
     const old = [...mine('死神'), ...mine('夜枭'), ...mine('铁砧')].filter((d) => d.t > 360).sort((a, b) => a.t - b.t)[0];

@@ -1,3 +1,7 @@
+import { useEffect, useState } from 'react';
+import { useFresh } from './TopBar';
+import { VEHICLE_LABELS } from './vehicleIcons';
+import { measure } from './mapRenderer';
 import { getState, setState, useStore, type Tool, type PointCat } from './store';
 import { selectTool, cancelDraft, undoPoint, finishDraft, deleteDrawing, updateDrawing, undo, kindName, AREA_LABEL, ROUTE_LABEL } from './actions';
 import { ToolIcon, TOOL_LABEL } from './icons';
@@ -19,39 +23,28 @@ function Toggle({ on, label, onClick, title }: { on: boolean; label: string; onC
   return <button className={'tog' + (on ? ' on' : '')} aria-pressed={on} onClick={onClick} title={title}><span className="knob" />{label}</button>;
 }
 
-export default function ToolPanel({ orient, w, h }: { orient: 'side' | 'bottom'; w: number; h: number }) {
-  const tool = useStore((s) => s.tool);
-  const density = useStore((s) => s.density);
-  const cmd = density === 'command';
-  const narrow = w < 300 || (orient === 'side' && w < 200);
-  const tiny = (h < 232 && orient === 'bottom') || (h < 320 && orient === 'side');
-  const iconOnly = !cmd || (orient === 'side' && (w < 150 || tiny));
-  const opts = (
-    <div className="opts">
-      {tool === 'select' && <SelectOpts cmd={cmd} />}
-      {tool === 'point' && <PointOpts cmd={cmd} narrow={narrow} />}
-      {tool === 'route' && <RouteOpts cmd={cmd} />}
-      {tool === 'area' && <AreaOpts cmd={cmd} />}
-      {tool === 'source' && <SourceOpts cmd={cmd} />}
-      {tool === 'ruler' && <RulerOpts cmd={cmd} />}
-      {tool === 'layers' && <LayerOpts cmd={cmd} />}
-    </div>
-  );
-  return (
-    <div className={`tools ${orient} ${cmd ? 'cmd' : 'mem'} ${tiny ? 'tiny' : ''}`} style={{ width: w, height: h }}>
-      {orient === 'bottom' && opts}
-      <div className={'toolrow' + (iconOnly ? ' icons' : '')} role="toolbar" aria-label="标绘工具">
-        {TOOLS.map((t) => (
-          <button key={t} className={'tool' + (tool === t ? ' on' : '')} onClick={() => selectTool(t)} title={TOOL_LABEL[t]} aria-label={TOOL_LABEL[t]} aria-pressed={tool === t} data-tool={t}>
-            <ToolIcon tool={t} size={iconOnly ? 21 : 19} />
-            {!iconOnly && <span>{TOOL_LABEL[t]}</span>}
-          </button>
-        ))}
-      </div>
-      {orient === 'side' && opts}
-      <Footer />
-    </div>
-  );
+export default function ToolPanel() {
+  const tool = useStore(s => s.tool), cmd = useStore(s => s.density === 'command'), active = useStore(s => s.activeMap);
+  const unit = useStore(s => s.selectedUnit);
+  return <div className="tools"><div className="panel-head"><b>{unit ? '单位详情' : TOOL_LABEL[tool]}</b><span className="meta">{active === 'ground' ? '陆战' : '空战'}</span><button className="x" aria-label="关闭详情" onClick={() => setState({ panelOpen: false })}>×</button></div><div className="opts">
+    {unit ? <UnitDetails id={unit} /> : <>
+      {tool === 'select' && <SelectOpts cmd={cmd} />}{tool === 'point' && <PointOpts cmd={cmd} narrow={false} />}
+      {tool === 'route' && <RouteOpts cmd={cmd} />}{tool === 'area' && <AreaOpts cmd={cmd} />}
+      {tool === 'source' && <SourceOpts cmd={cmd} />}{tool === 'ruler' && <RulerOpts cmd={cmd} />}{tool === 'layers' && <LayerOpts cmd={cmd} />}
+    </>}
+  </div><Footer /></div>;
+}
+function UnitDetails({ id }: { id: string }) {
+  const snap = useFresh(), f = snap.friends.find(x => x.id === id), c = snap.contacts.find(x => x.id === id);
+  const unit = f ?? c;
+  if (!unit || unit.ageMs > 2000) return <div className="empty">观测已过期，位置已移除</div>;
+  const map = unit.only ?? (unit.air ? 'air' : 'ground'), cls = c?.icon ?? f?.vehicle ?? 'Unknown';
+  return <dl className="unit-details"><dt>呼号</dt><dd>{f?.nick || '匿名单位'}</dd><dt>类别 / 型号</dt><dd>{VEHICLE_LABELS[cls] ?? cls}</dd><dt>网格</dt><dd>{gridRef(map, unit.w)}</dd><dt>数据年龄</dt><dd>{Math.round(unit.ageMs)} ms</dd><dt>朝向</dt><dd>{unit.hdg == null ? '未知' : `${Math.round(unit.hdg)}°`}</dd>{c && <><dt>观测来源</dt><dd>{c.sources?.join(' / ') || '当前回传'}</dd></>}</dl>;
+}
+function LabelInput({ id, value, placeholder }: { id: string; value: string; placeholder: string }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [id, value]);
+  return <input className="name" value={text} maxLength={32} placeholder={placeholder} onChange={e => setText(e.target.value)} onBlur={() => { if (text !== value) updateDrawing(id, { label: text }); }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} />;
 }
 
 function Footer() {
@@ -104,7 +97,7 @@ function SelectOpts({ cmd }: { cmd: boolean }) {
 function Editor({ cmd, more, moving }: { cmd: boolean; more: boolean; moving: boolean }) {
   const d = useStore((s) => s.drawings.find((x) => x.id === s.selectedId))!;
   const extra = cmd || more;
-  const len = d.kind !== 'point' && d.pts.length > 1 ? d.pts.slice(1).reduce((a, p, i) => a + dist(d.pts[i], p), 0) * metersPerCanon('ground') : 0;
+  const len = d.kind !== 'point' && d.pts.length > 1 ? d.pts.slice(1).reduce((a, p, i) => a + measure(d.scope === 'air' ? 'air' : 'ground', d.pts[i], p), 0) : 0;
   return (
     <div className="editor">
       <div className="ehead">
@@ -114,12 +107,12 @@ function Editor({ cmd, more, moving }: { cmd: boolean; more: boolean; moving: bo
         <button className="x" onClick={() => setState({ selectedId: null, moving: false })} aria-label="关闭">×</button>
       </div>
       <div className="erow nrow">
-        <input className="name" value={d.label} maxLength={16} placeholder="名称（可选）" onChange={(e) => updateDrawing(d.id, { label: e.target.value }, false)} />
+        <LabelInput id={d.id} value={d.label} placeholder="名称（可选）" />
         <Seg small value={d.status} opts={[['present', '现状'], ['planned', '计划']]} onChange={(v) => updateDrawing(d.id, { status: v })} />
       </div>
       {(extra || d.kind === 'source' || d.kind === 'route' || d.kind === 'arrow') && (
         <div className={'erow' + (more ? '' : ' extra')}>
-          {extra && <Seg small value={d.scope} opts={[['both', '双图'], ['ground', '仅陆'], ['air', '仅空']]} onChange={(v) => updateDrawing(d.id, { scope: v })} />}
+          {extra && <span className="meta">{d.scope === 'air' ? '空战地图' : '陆战地图'}</span>}
           {(d.kind === 'route' || d.kind === 'arrow') && <Toggle on={!!d.smooth} label="曲线" onClick={() => updateDrawing(d.id, { smooth: !d.smooth })} />}
           {d.kind === 'source' && <Seg small value={d.sector ?? 0} opts={[[0, '直线'], [30, '±15°'], [60, '±30°']]} onChange={(v) => updateDrawing(d.id, { sector: v })} />}
         </div>
@@ -169,7 +162,7 @@ function PointOpts({ cmd, narrow }: { cmd: boolean; narrow: boolean }) {
       <div className="erow"><StatusSeg />{cmd && <span className="hint">点击地图放置{CAT_LABEL[cat]}</span>}</div>
       {sel && just && (
         <div className="justadded">
-          <input className="name" value={just.label} maxLength={16} placeholder={`命名刚放置的${CAT_LABEL[just.cat!]}点`} onChange={(e) => updateDrawing(just.id, { label: e.target.value }, false)} />
+          <LabelInput id={just.id} value={just.label} placeholder={`命名刚放置的${CAT_LABEL[just.cat!]}点`} />
           <button className="danger" onClick={() => deleteDrawing(just.id)}>删除</button>
         </div>
       )}
@@ -223,7 +216,7 @@ function SourceOpts({ cmd }: { cmd: boolean }) {
 function RulerOpts({ cmd }: { cmd: boolean }) {
   const r = useStore((s) => s.ruler);
   const sp = useStore((s) => s.rulerSpeed);
-  const total = r && r.pts.length > 1 ? r.pts.slice(1).reduce((a, p, i) => a + dist(r.pts[i], p), 0) * metersPerCanon(r.map) : 0;
+  const total = r && r.pts.length > 1 ? r.pts.slice(1).reduce((a, p, i) => a + measure(r.map, r.pts[i], p), 0) : 0;
   return (
     <>
       <div className="erow"><Seg small value={sp} opts={[[30, '30 km/h'], [60, '60'], [450, '450 空']]} onChange={(v) => setState({ rulerSpeed: v })} /></div>

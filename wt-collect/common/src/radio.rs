@@ -8,7 +8,7 @@
 use serde::Serialize;
 use serde_json::Value;
 
-pub const OWN_NAMES: &[&str] = &["传奇耐摔王无声铃鹿"];
+pub const OWN_NAMES: &[&str] = &[];
 
 const PING_KINDS: &[(&str, &[&str])] = &[
     ("ping_map", &["注意战术地图", "attention to the map"]),
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!((m.kind, m.category(), m.grid.as_deref()), ("need_cover", "location", Some("E6")));
         let m = parse_chat(&json!({"id": 1, "msg": "请\u{200b}求\u{200b}指\u{200b}示\u{200b}空\u{200b}袭\u{200b}目\u{200b}标<color=#FF96966E> [a14, 高\u{200b}度 1000 米]</color>", "sender": "c"}), OWN_NAMES);
         assert_eq!((m.kind, m.grid.as_deref(), m.alt_m), ("air_target_request", Some("A14"), Some(1000.0)));
-        let m = parse_chat(&json!({"id": 127, "msg": "注\u{200b}意\u{200b}战\u{200b}术\u{200b}地\u{200b}图！", "sender": "传奇耐摔王无声铃鹿"}), OWN_NAMES);
+        let m = parse_chat(&json!({"id": 127, "msg": "注\u{200b}意\u{200b}战\u{200b}术\u{200b}地\u{200b}图！", "sender": "tester"}), &["tester"]);
         assert!(m.own && m.is_ping() && m.grid.is_none());
         assert_eq!(parse_chat(&json!({"id": 2, "msg": "注\u{200b}意\u{200b}当\u{200b}前\u{200b}标\u{200b}识\u{200b}区\u{200b}域！<color=#FF50BE46> [b3]</color>"}), OWN_NAMES).kind, "ping_marked");
         assert_eq!(parse_chat(&json!({"id": 2, "msg": "Guide on me [C5, alt. 600 m]"}), OWN_NAMES).alt_m, Some(600.0));

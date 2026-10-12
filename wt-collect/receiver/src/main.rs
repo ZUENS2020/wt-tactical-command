@@ -8,7 +8,7 @@ use axum::{
     Json, Router,
 };
 use serde::Deserialize;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -16,8 +16,10 @@ use std::sync::{Arc, Mutex};
 use wtc_common::{now_ms, Batch, Record};
 
 mod guard;
+#[allow(dead_code)] // Historical exports remain readable; live label writes are disabled.
 mod labels;
 mod live;
+mod runtime;
 mod markers;
 mod naval;
 
@@ -28,13 +30,10 @@ struct App {
     min_free: u64,
     started_ms: i64,
     inner: Mutex<Inner>,
-    naval_cfg: naval::NavalCfg,
-    icon_stats: Mutex<naval::IconStats>,
     guard_cfg: guard::GuardCfg,
-    /// live team view (rooms, battles, drawings); lock order: inner -> hub
-    hub: Mutex<live::Hub>,
+    /// Room actors own live state; network locks never enclose room updates.
+    hub: runtime::Runtime,
     img_index: Mutex<(i64, HashMap<String, PathBuf>)>,
-    replays: Mutex<HashMap<String, Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 #[derive(Default)]
@@ -62,9 +61,7 @@ struct Sess {
     dir: PathBuf,
     player: String,
     version: String,
-    seqs: Option<HashSet<u64>>,
-    file_idx: u32,
-    file_size: u64,
+    watermarks: HashMap<String, (u64, u64)>,
     records: u64,
     dups: u64,
     raw_bytes: u64,
@@ -81,38 +78,16 @@ struct Sess {
     army: Option<String>,
     vehicle: Option<String>,
     notes: Vec<(i64, String)>,
-    naval: naval::NavalState,
     naval_objs: u64,
     naval_ticks: u64,
     guard: guard::GuardStats,
-    guard_written_ms: i64,
-    guard_dirty: bool,
     /// latest #state / #heartbeat of a 0.2.0 collector: (recv_ms, paused, reason)
     gate: Option<(i64, bool, String)>,
     labels: u64,
-    /// squad / map ping / radio derivation (markers.rs) -> markers.jsonl
+    /// In-memory radio derivations for diagnostics
     markers: markers::Markers,
 }
 
-/// Append records (already serialized lines) to the session's current samples file + seq.idx.
-fn write_lines(s: &mut Sess, lines: &[u8], new_seqs: &[u8]) -> std::io::Result<u64> {
-    if s.file_size > 128 * 1024 * 1024 {
-        s.file_idx += 1;
-        s.file_size = 0;
-    }
-    let path = s.dir.join(format!("samples-{:04}.jsonl.gz", s.file_idx));
-    let mut enc = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
-    enc.write_all(lines)?;
-    let member = enc.finish()?;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
-    f.write_all(&member)?;
-    f.sync_data().ok();
-    let mut fi = std::fs::OpenOptions::new().create(true).append(true).open(s.dir.join("seq.idx"))?;
-    fi.write_all(new_seqs)?;
-    s.file_size += member.len() as u64;
-    s.raw_bytes += lines.len() as u64;
-    Ok(member.len() as u64 + new_seqs.len() as u64)
-}
 
 fn env(k: &str, d: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| d.to_string())
@@ -196,261 +171,66 @@ impl App {
     }
 
     fn sess<'a>(&self, inner: &'a mut Inner, id: &str, player: &str, version: &str) -> std::io::Result<&'a mut Sess> {
-        if !inner.sessions.contains_key(id) {
-            let dir = match inner.known_dirs.get(id) {
-                Some(d) => d.clone(),
-                None => {
-                    let date = if id.len() >= 8 && id[..8].chars().all(|c| c.is_ascii_digit()) {
-                        format!("{}-{}-{}", &id[0..4], &id[4..6], &id[6..8])
-                    } else {
-                        chrono::Local::now().format("%Y-%m-%d").to_string()
-                    };
-                    self.root.join(date).join(id)
-                }
-            };
-            std::fs::create_dir_all(dir.join("images"))?;
-            let meta_p = dir.join("session.json");
-            let (mut pl, mut ver) = (player.to_string(), version.to_string());
-            if let Ok(b) = std::fs::read(&meta_p) {
-                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
-                    if pl.is_empty() {
-                        pl = v["player"].as_str().unwrap_or("").into();
-                    }
-                    if ver.is_empty() {
-                        ver = v["version"].as_str().unwrap_or("").into();
-                    }
-                }
-            } else {
-                let m = serde_json::json!({"session": id, "player": player, "version": version, "first_recv_ms": now_ms()});
-                std::fs::write(&meta_p, serde_json::to_vec_pretty(&m).unwrap())?;
-            }
-            // continue numbering of sample files
-            let files = wtc_common::sample_files(&dir);
-            let file_idx = files.len() as u32;
-            let file_size = files.last().and_then(|f| f.metadata().ok()).map(|m| m.len()).unwrap_or(u64::MAX);
-            let mut notes = Vec::new();
-            if let Ok(b) = std::fs::read_to_string(dir.join("notes.jsonl")) {
-                for l in b.lines() {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(l) {
-                        notes.push((v["wall_ms"].as_i64().unwrap_or(0), v["text"].as_str().unwrap_or("").to_string()));
-                    }
-                }
-            }
-            let s = Sess {
-                id: id.to_string(),
-                dir: dir.clone(),
-                player: pl,
-                version: ver,
-                file_idx: file_idx.max(1),
-                file_size: if file_idx == 0 { 0 } else { file_size },
-                notes,
-                guard: std::fs::read(dir.join("guard.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default(),
-                ..Default::default()
-            };
-            inner.known_dirs.insert(id.to_string(), dir);
-            inner.sessions.insert(id.to_string(), s);
-        }
-        let s = inner.sessions.get_mut(id).unwrap();
-        if s.seqs.is_none() {
-            let mut set = HashSet::new();
-            if let Ok(b) = std::fs::read(s.dir.join("seq.idx")) {
-                for c in b.chunks_exact(8) {
-                    set.insert(u64::from_le_bytes(c.try_into().unwrap()));
-                }
-            }
-            s.seqs = Some(set);
-        }
+        let s = inner.sessions.entry(id.into()).or_insert_with(|| Sess {
+            id: id.into(), dir: self.root.join("_maps"), player: player.into(), version: version.into(),
+            ..Default::default()
+        });
+        if !player.is_empty() { s.player = player.into(); }
+        if !version.is_empty() { s.version = version.into(); }
         Ok(s)
     }
 
     fn ingest(&self, batch: Batch) -> Result<serde_json::Value, (StatusCode, String)> {
-        if !safe_id(&batch.session) {
-            return Err((StatusCode::BAD_REQUEST, "bad session id".into()));
+        if !safe_id(&batch.session) || (!batch.device_id.is_empty() && !safe_id(&batch.device_id)) {
+            return Err((StatusCode::BAD_REQUEST, "bad identity".into()));
         }
-        let mut inner = self.inner.lock().unwrap();
-        self.guard(&inner, 0)?;
-        let ie = |e: std::io::Error| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
-        let s = self.sess(&mut inner, &batch.session, &batch.player, &batch.version).map_err(ie)?;
-        let now = now_ms();
-        s.last_recv = now;
-        let mut lines = Vec::<u8>::new();
-        let mut new_seqs = Vec::<u8>::new();
-        let (mut acc, mut dup, mut foreign) = (0u64, 0u64, 0u64);
+        if batch.records.len() > 128 { return Err((StatusCode::PAYLOAD_TOO_LARGE, "too many records".into())); }
         let mode = guard::batch_mode(&self.guard_cfg, &batch);
-        if s.guard.max_skew_ms == 0 {
+        let now = now_ms();
+        let room = self.hub.for_player(&batch.player);
+        let mut accepted = Vec::new();
+        let (mut acc, mut dup, mut foreign, mut too_old, mut future, mut no_sync, mut reordered) = (0u64, 0u64, 0u64, 0u64, 0u64, 0u64, 0u64);
+        let parsed_records: HashMap<u64, serde_json::Value> = batch.records.iter().filter_map(|r| r.body.as_deref().and_then(|b| serde_json::from_str(b).ok()).map(|v| (r.seq,v))).collect();
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.sessions.retain(|_, s| now - s.last_recv < 15 * 60_000);
+            if inner.sessions.len() >= 256 && !inner.sessions.contains_key(&batch.session) { return Err((StatusCode::TOO_MANY_REQUESTS, "too many active collectors".into())); }
+            let s = self.sess(&mut inner, &batch.session, &batch.player, &batch.version).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            s.last_recv = now;
+            if let Some(c) = &batch.clock { s.guard.note_clock(c); }
             s.guard.max_skew_ms = self.guard_cfg.max_skew_ms;
-        }
-        if let Some(c) = &batch.clock {
-            s.guard.note_clock(c);
-        }
-        let (mut too_old, mut future, mut no_sync, mut legacy) = (0u64, 0u64, 0u64, 0u64);
-        let mut records = batch.records;
-        if mode == guard::Mode::RejectNoSync {
-            no_sync = records.len() as u64;
-            s.guard.no_sync += no_sync;
-            s.guard.batches_rejected_no_sync += 1;
-            records.clear();
-        }
-        records.sort_by_key(|r| r.seq);
-        let mut ist = self.icon_stats.lock().unwrap();
-        let mut hub = self.hub.lock().unwrap();
-        for mut r in records {
-            if r.session != batch.session {
-                foreign += 1;
-                continue;
-            }
-            r.recv_ms = Some(now);
-            if let guard::Mode::Synced(off) = mode {
-                let ts = *r.ts_server_ms.get_or_insert(r.wall_ms + off.round() as i64);
-                match guard::verdict(&self.guard_cfg, ts, now) {
-                    guard::Verdict::Accept => {}
-                    guard::Verdict::TooOld => {
-                        too_old += 1;
-                        continue;
-                    }
-                    guard::Verdict::FromFuture => {
-                        future += 1;
-                        continue;
-                    }
+            let mut records = batch.records;
+            records.sort_by_key(|r| (r.mono_ns, r.seq));
+            for mut r in records {
+                if r.session != batch.session { foreign += 1; continue; }
+                if mode == guard::Mode::RejectNoSync { no_sync += 1; continue; }
+                if let guard::Mode::Synced(off) = mode { r.ts_server_ms.get_or_insert(r.wall_ms + off.round() as i64); }
+                let ts = r.ts_server_ms.unwrap_or(r.wall_ms);
+                // Future clock tolerance is independent from the hard live-age deadline.
+                if now - ts > wtc_common::LIVE_MAX_AGE_MS { too_old += 1; continue; }
+                if ts - now > self.guard_cfg.max_skew_ms { future += 1; continue; }
+                let order = (if r.mono_ns > 0 { r.mono_ns } else { ts.max(0) as u64 * 1_000_000 }, r.seq);
+                if let Some(old) = s.watermarks.get(&r.ep) {
+                    if *old >= order { if *old == order { dup += 1; } else { reordered += 1; } continue; }
                 }
-            }
-            if s.seqs.as_ref().unwrap().contains(&r.seq) {
-                dup += 1;
-                continue;
-            }
-            if let Some(ts) = r.ts_server_ms {
+                s.watermarks.insert(r.ep.clone(), order);
+                r.recv_ms = Some(now);
                 s.guard.note_delay(now - ts);
+                live_update(s, &r, now, parsed_records.get(&r.seq));
+                accepted.push(r); acc += 1;
             }
-            if mode == guard::Mode::Legacy {
-                legacy += 1;
-            }
-            if !s.seqs.as_mut().unwrap().insert(r.seq) {
-                dup += 1;
-                continue;
-            }
-            acc += 1;
-            // naval filter BEFORE anything is written
-            naval::apply(&self.naval_cfg, &mut s.naval, &mut ist, &mut r);
-            s.naval_objs += r.filtered_naval.unwrap_or(0) as u64;
-            if r.dropped.is_some() {
-                s.naval_ticks += 1;
-            }
-            new_seqs.extend_from_slice(&r.seq.to_le_bytes());
-            if let Ok(j) = serde_json::to_vec(&r) {
-                lines.extend_from_slice(&j);
-                lines.push(b'\n');
-            }
-            live_update(s, &r, now);
-            s.markers.feed(&r);
-            hub.feed(&s.id, &s.player, None, &r, now);
+            s.records += acc; s.dups += dup;
+            s.guard.accepted += acc; s.guard.too_old += too_old; s.guard.from_future += future; s.guard.no_sync += no_sync;
         }
-        drop(hub);
-        drop(ist);
-        if !s.markers.out.is_empty() {
-            let mut buf = Vec::new();
-            for v in s.markers.out.drain(..) {
-                if let Ok(j) = serde_json::to_vec(&v) {
-                    buf.extend_from_slice(&j);
-                    buf.push(b'\n');
-                }
-            }
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(s.dir.join("markers.jsonl")) {
-                let _ = f.write_all(&buf);
-            }
-        }
-        s.guard.accepted += acc;
-        s.guard.too_old += too_old;
-        s.guard.from_future += future;
-        s.guard.legacy_accepted += legacy;
-        s.guard_dirty = true;
-        if too_old + future + no_sync > 0 || now - s.guard_written_ms > 2000 {
-            s.guard.updated_ms = now;
-            if let Ok(b) = serde_json::to_vec_pretty(&s.guard) {
-                let tmp = s.dir.join("guard.json.tmp");
-                if std::fs::write(&tmp, b).is_ok() {
-                    let _ = std::fs::rename(&tmp, s.dir.join("guard.json"));
-                }
-            }
-            s.guard_written_ms = now;
-            s.guard_dirty = false;
-        }
-        s.dups += dup;
-        s.records += acc;
-        let mut written = 0u64;
-        if acc > 0 {
-            written = write_lines(s, &lines, &new_seqs).map_err(ie)?;
-        }
-        inner.data_bytes += written;
-        Ok(serde_json::json!({"accepted": acc, "dup": dup, "foreign": foreign,
-            "dropped": {"too_old": too_old, "from_future": future, "no_sync": no_sync},
-            "legacy": mode == guard::Mode::Legacy, "server_ms": now}))
+        // No session/sequence/sample/event files are created by live ingest.
+        let mut overflow = 0;
+        for r in accepted { if !room.offer(&batch.session, &batch.player, &batch.device_id, &batch.nickname, r) { overflow += 1; } }
+        Ok(serde_json::json!({"accepted": acc, "dup": dup, "foreign": foreign, "out_of_order": reordered,
+            "dropped": {"too_old": too_old, "from_future": future, "no_sync": no_sync, "overflow": overflow}, "server_ms": now}))
     }
 }
 
 impl App {
-    /// POST /api/label: store label events. Never dropped for clock skew (flagged `late` instead).
-    fn ingest_labels(&self, b: labels::LabelBatchIn) -> Result<serde_json::Value, (StatusCode, String)> {
-        if !safe_id(&b.session) {
-            return Err((StatusCode::BAD_REQUEST, "bad session id".into()));
-        }
-        if b.labels.len() > 1000 {
-            return Err((StatusCode::PAYLOAD_TOO_LARGE, "too many labels".into()));
-        }
-        let mut inner = self.inner.lock().unwrap();
-        self.guard(&inner, 0)?;
-        let ie = |e: std::io::Error| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
-        let now = now_ms();
-        let s = self.sess(&mut inner, &b.session, &b.player, &b.version).map_err(ie)?;
-        s.last_recv = now;
-        let (mut lines, mut flat, mut new_seqs) = (Vec::<u8>::new(), Vec::<u8>::new(), Vec::<u8>::new());
-        let (mut acc, mut dup) = (0u64, 0u64);
-        let mut bad = Vec::new();
-        let mut uids = Vec::new();
-        let items = b.labels.clone();
-        for v in items {
-            let uid = v["uid"].as_str().unwrap_or("").to_string();
-            let r = match labels::to_record(&b, v, now, self.guard_cfg.max_skew_ms) {
-                Ok(r) => r,
-                Err(e) => {
-                    bad.push(serde_json::json!({"uid": uid, "error": e}));
-                    continue;
-                }
-            };
-            uids.push(uid);
-            if !s.seqs.as_mut().unwrap().insert(r.seq) {
-                dup += 1;
-                continue;
-            }
-            acc += 1;
-            new_seqs.extend_from_slice(&r.seq.to_le_bytes());
-            if let Ok(j) = serde_json::to_vec(&r) {
-                lines.extend_from_slice(&j);
-                lines.push(b'\n');
-            }
-            flat.extend_from_slice(r.body.as_deref().unwrap_or("{}").as_bytes());
-            flat.push(b'\n');
-            live_update(s, &r, now);
-        }
-        let mut written = 0;
-        if acc > 0 {
-            written = write_lines(s, &lines, &new_seqs).map_err(ie)?;
-            let mut f = std::fs::OpenOptions::new().create(true).append(true).open(s.dir.join("labels.jsonl")).map_err(ie)?;
-            f.write_all(&flat).map_err(ie)?;
-            f.sync_data().ok();
-            written += flat.len() as u64;
-            s.records += acc;
-            s.labels += acc;
-        }
-        s.dups += dup;
-        let sid = s.id.clone();
-        inner.data_bytes += written;
-        if acc > 0 {
-            eprintln!("[{}] labels: session {sid} +{acc} (dup {dup}, bad {})", fmt_local(now), bad.len());
-        }
-        // malformed labels are reported but the batch is confirmed: retrying them would never succeed
-        Ok(serde_json::json!({"accepted": acc, "dup": dup, "bad": bad, "uids": uids, "session": sid, "server_ms": now}))
-    }
-
     /// Session dirs matching a selector: exact id, id prefix/substring, "latest", or all of a date.
     fn select_dirs(&self, session: Option<&str>, date: Option<&str>) -> Vec<(String, PathBuf)> {
         let inner = self.inner.lock().unwrap();
@@ -482,7 +262,7 @@ fn constant_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn live_update(s: &mut Sess, r: &Record, now: i64) {
+fn live_update(s: &mut Sess, r: &Record, now: i64, parsed: Option<&serde_json::Value>) {
     let e = s.eps.entry(r.ep.clone()).or_default();
     let err = r.err.is_some();
     e.total += 1;
@@ -519,7 +299,7 @@ fn live_update(s: &mut Sess, r: &Record, now: i64) {
             }
         }
         "#label" => {
-            if let Some(v) = r.body.as_deref().and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) {
+            if let Some(v) = parsed {
                 let t = format!(
                     "[标签] {}{}{}",
                     v["text"].as_str().unwrap_or(""),
@@ -530,7 +310,7 @@ fn live_update(s: &mut Sess, r: &Record, now: i64) {
             }
         }
         "#state" | "#heartbeat" => {
-            if let Some(v) = r.body.as_deref().and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok()) {
+            if let Some(v) = parsed {
                 s.gate = Some((now, v["paused"].as_bool().unwrap_or(false), v["reason"].as_str().unwrap_or("").to_string()));
             }
         }
@@ -540,8 +320,7 @@ fn live_update(s: &mut Sess, r: &Record, now: i64) {
             }
         }
         "/map_info.json" | "/map_obj.json" | "/mission.json" | "/indicators" => {
-            let Some(b) = &r.body else { return };
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(b) else { return };
+            let Some(v) = parsed else { return };
             match r.ep.as_str() {
                 "/map_info.json" => {
                     s.map_valid = v["valid"].as_bool();
@@ -589,25 +368,16 @@ async fn ingest(State(app): St, h: HeaderMap, body: Bytes) -> Response {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     let gz = h.get(header::CONTENT_ENCODING).and_then(|v| v.to_str().ok()).map(|v| v.contains("gzip")).unwrap_or(false);
-    let raw = if gz {
-        let mut out = Vec::new();
-        let d = flate2::read::MultiGzDecoder::new(&body[..]);
-        if d.take(1 << 30).read_to_end(&mut out).is_err() {
-            return err(StatusCode::BAD_REQUEST, "bad gzip");
-        }
-        out
-    } else {
-        body.to_vec()
-    };
-    let batch: Batch = match serde_json::from_slice(&raw) {
-        Ok(b) => b,
-        Err(e) => return err(StatusCode::BAD_REQUEST, format!("bad json: {e}")),
-    };
-    let app2 = app.clone();
-    match tokio::task::spawn_blocking(move || app2.ingest(batch)).await {
-        Ok(Ok(v)) => Json(v).into_response(),
-        Ok(Err((c, m))) => err(c, m),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    match tokio::task::spawn_blocking(move || {
+        let raw = if gz {
+            let mut out = Vec::new();
+            flate2::read::MultiGzDecoder::new(&body[..]).take(16 * 1024 * 1024 + 1).read_to_end(&mut out).map_err(|e| (StatusCode::BAD_REQUEST,e.to_string()))?;
+            if out.len() > 16 * 1024 * 1024 { return Err((StatusCode::PAYLOAD_TOO_LARGE,"expanded batch too large".into())); } out
+        } else { body.to_vec() };
+        let batch: Batch = serde_json::from_slice(&raw).map_err(|e| (StatusCode::BAD_REQUEST,format!("bad json: {e}")))?;
+        app.ingest(batch)
+    }).await {
+        Ok(Ok(v)) => Json(v).into_response(), Ok(Err((c,m))) => err(c,m), Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR,e.to_string())
     }
 }
 
@@ -633,89 +403,24 @@ async fn image(State(app): St, h: HeaderMap, Query(q): Query<ImgQ>, body: Bytes)
     }
     let app2 = app.clone();
     let r = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, (StatusCode, String)> {
-        let mut inner = app2.inner.lock().unwrap();
-        app2.guard(&inner, body.len() as u64)?;
-        let s = app2.sess(&mut inner, &q.session, "", "").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-        s.last_recv = now_ms();
         let ext = wtc_common::sniff_image(&body);
-        let p = s.dir.join("images").join(format!("{}.{ext}", q.hash));
-        let mut new = false;
-        if !p.exists() {
-            std::fs::write(&p, &body).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-            new = true;
-        }
+        if ext == "bin" { return Err((StatusCode::BAD_REQUEST, "unsupported map image".into())); }
+        let dir = app2.root.join("_maps");
+        std::fs::create_dir_all(&dir).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let p = dir.join(format!("{}.{ext}", q.hash));
+        let new = !p.exists();
         if new {
-            inner.data_bytes += body.len() as u64;
+            let incoming = body.len() as u64;
+            { let inner = app2.inner.lock().unwrap(); app2.guard(&inner, incoming)?; }
+            let tmp = dir.join(format!("{}-{:x}.tmp", q.hash, rand::random::<u64>()));
+            std::fs::write(&tmp, &body).and_then(|_| std::fs::rename(&tmp, &p)).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            app2.inner.lock().unwrap().data_bytes += incoming;
         }
+        app2.img_index.lock().unwrap().1.insert(q.hash.clone(), p);
+        app2.hub.image_ready(q.hash);
         Ok(serde_json::json!({"stored": new, "bytes": body.len()}))
-    })
-    .await;
-    match r {
-        Ok(Ok(v)) => Json(v).into_response(),
-        Ok(Err((c, m))) => err(c, m),
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    }
-}
-
-#[derive(Deserialize)]
-struct NoteReq {
-    text: String,
-    session: Option<String>,
-    player: Option<String>,
-}
-
-async fn note(State(app): St, h: HeaderMap, Json(n): Json<NoteReq>) -> Response {
-    if !app.authed(&h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
-    let mut inner = app.inner.lock().unwrap();
-    let sid = match n.session.clone().filter(|s| !s.is_empty()) {
-        Some(s) => Some(s),
-        None => {
-            let pl = n.player.clone().filter(|p| !p.is_empty());
-            inner
-                .sessions
-                .values()
-                .filter(|s| pl.as_ref().map(|p| &s.player == p).unwrap_or(true))
-                .max_by_key(|s| s.last_recv)
-                .or_else(|| inner.sessions.values().max_by_key(|s| s.last_recv))
-                .map(|s| s.id.clone())
-        }
-    };
-    let Some(sid) = sid else { return err(StatusCode::NOT_FOUND, "no session yet") };
-    if !safe_id(&sid) {
-        return err(StatusCode::BAD_REQUEST, "bad session");
-    }
-    let s = match app.sess(&mut inner, &sid, "", "") {
-        Ok(s) => s,
-        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-    };
-    let w = now_ms();
-    let line = serde_json::json!({"wall_ms": w, "text": n.text, "source": "api", "player": n.player});
-    let res = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(s.dir.join("notes.jsonl"))
-        .and_then(|mut f| f.write_all(format!("{line}\n").as_bytes()));
-    if let Err(e) = res {
-        return err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string());
-    }
-    s.notes.push((w, n.text.clone()));
-    Json(serde_json::json!({"session": sid, "wall_ms": w})).into_response()
-}
-
-async fn label_post(State(app): St, h: HeaderMap, body: Bytes) -> Response {
-    if !app.authed(&h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
-    let b: labels::LabelBatchIn = match serde_json::from_slice(&body) {
-        Ok(b) => b,
-        Err(e) => return err(StatusCode::BAD_REQUEST, format!("bad json: {e}")),
-    };
-    match app.ingest_labels(b) {
-        Ok(v) => Json(v).into_response(),
-        Err((c, m)) => err(c, m),
-    }
+    }).await;
+    match r { Ok(Ok(v)) => Json(v).into_response(), Ok(Err((c, m))) => err(c, m), Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()) }
 }
 
 #[derive(Deserialize)]
@@ -1101,18 +806,15 @@ async fn main() -> anyhow::Result<()> {
     }
     let guard_cfg = guard::GuardCfg::from_env();
     eprintln!("[{}] clock guard: max skew {} ms, legacy collectors {:?}", fmt_local(now_ms()), guard_cfg.max_skew_ms, guard_cfg.legacy);
-    let hub = live::Hub::from_env(&root);
+    let hub = runtime::Runtime::new(&root);
     if hub.view_key.len() < 8 {
         eprintln!("[{}] WARNING: WT_VIEW_TOKEN missing/short: live map (/api/live, /api/map) disabled", fmt_local(now_ms()));
     }
-    eprintln!("[{}] live: rooms dir {}, default room '{}'", fmt_local(now_ms()), hub.dir.display(), hub.default_room);
+    eprintln!("[{}] live: rooms dir {}, default room '{}'", fmt_local(now_ms()), root.display(), hub.default_room);
     let app = Arc::new(App {
-        hub: Mutex::new(hub),
+        hub,
         img_index: Mutex::new((0, HashMap::new())),
-        replays: Mutex::new(HashMap::new()),
         guard_cfg,
-        naval_cfg,
-        icon_stats: Mutex::new(icon_stats),
         root,
         token,
         max_bytes: (max_gb * 1073741824.0) as u64,
@@ -1128,55 +830,30 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/time", get(api_time))
         .route("/api/ingest", post(ingest))
         .route("/api/image", post(image))
-        .route("/api/note", post(note))
-        .route("/api/label", post(label_post))
+        .route("/api/note", post(|| async { StatusCode::GONE }))
+        .route("/api/label", post(|| async { StatusCode::GONE }))
         .route("/api/labels", get(labels_get))
         .route("/api/markers", get(markers_get))
         .route("/img/{session}/{file}", get(img_get))
         .route("/api/live", get(live_ws))
         .route("/api/live/check", get(live_check))
         .route("/api/map/{file}", get(map_get))
-        .route("/api/replay", post(replay_start))
-        .route("/api/replay/stop", post(replay_stop))
+        .route("/api/replay", post(|| async { StatusCode::GONE }))
+        .route("/api/replay/stop", post(|| async { StatusCode::GONE }))
         .layer(DefaultBodyLimit::max(256 * 1024 * 1024))
         .with_state(app.clone());
-    {
-        // persist unknown-icon counters
-        let app = app.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                write_icon_stats(&app.root, &mut app.icon_stats.lock().unwrap());
-                let mut inner = app.inner.lock().unwrap();
-                for s in inner.sessions.values_mut().filter(|s| s.guard_dirty) {
-                    s.guard.updated_ms = now_ms();
-                    if let Ok(b) = serde_json::to_vec_pretty(&s.guard) {
-                        let tmp = s.dir.join("guard.json.tmp");
-                        if std::fs::write(&tmp, b).is_ok() && std::fs::rename(&tmp, s.dir.join("guard.json")).is_ok() {
-                            s.guard_dirty = false;
-                        }
-                    }
+    // Seed image readiness from both historical sessions and the shared static-resource cache.
+    let mut image_dirs: Vec<_> = app.inner.lock().unwrap().known_dirs.values().map(|d| d.join("images")).collect();
+    image_dirs.push(app.root.join("_maps"));
+    for dir in image_dirs {
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if let Some(hash) = p.file_stem().and_then(|s| s.to_str()).filter(|s| s.len() == 64 && s.chars().all(|c| c.is_ascii_hexdigit())) {
+                    app.hub.image_ready(hash.into()); app.img_index.lock().unwrap().1.insert(hash.into(), p);
                 }
             }
-        });
-    }
-    {
-        // live ticker: 10 Hz state broadcast, drawings persisted every 2 s
-        let app = app.clone();
-        tokio::spawn(async move {
-            let mut iv = tokio::time::interval(std::time::Duration::from_millis(100));
-            iv.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            let mut n = 0u64;
-            loop {
-                iv.tick().await;
-                n += 1;
-                let mut hub = app.hub.lock().unwrap();
-                hub.tick(now_ms());
-                if n % 20 == 0 {
-                    hub.save_all();
-                }
-            }
-        });
+        }
     }
     let l = tokio::net::TcpListener::bind(&bind).await?;
     let (used, known) = {
@@ -1196,8 +873,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::select! { _ = tokio::signal::ctrl_c() => {}, _ = t.recv() => {} }
         })
         .await?;
-    write_icon_stats(&app.root, &mut app.icon_stats.lock().unwrap());
-    app.hub.lock().unwrap().save_all();
+    app.hub.flush().await;
     Ok(())
 }
 
@@ -1305,7 +981,7 @@ impl App {
         if self.authed(h) {
             return true;
         }
-        let hub = self.hub.lock().unwrap();
+        let hub = &self.hub;
         match key {
             Some(k) => hub.view_key.len() >= 8 && constant_eq(k.as_bytes(), hub.view_key.as_bytes()),
             None => false,
@@ -1318,7 +994,7 @@ async fn live_check(State(app): St, h: HeaderMap, Query(q): Query<LiveQ>) -> Res
     if !app.view_ok(q.key.as_deref(), &h) {
         return err(StatusCode::UNAUTHORIZED, "bad room password");
     }
-    let def = app.hub.lock().unwrap().default_room.clone();
+    let def = app.hub.default_room.clone();
     Json(serde_json::json!({"ok": true, "default_room": def})).into_response()
 }
 
@@ -1327,7 +1003,7 @@ async fn live_ws(State(app): St, h: HeaderMap, Query(q): Query<LiveQ>, ws: axum:
     if !app.view_ok(q.key.as_deref(), &h) {
         return err(StatusCode::UNAUTHORIZED, "bad room password");
     }
-    let def = app.hub.lock().unwrap().default_room.clone();
+    let def = app.hub.default_room.clone();
     let Some(room) = room_name(q.room.as_deref(), &def) else { return err(StatusCode::BAD_REQUEST, "bad room") };
     let nick: String = q.nick.unwrap_or_default().chars().take(24).collect();
     ws.max_message_size(1 << 20).on_upgrade(move |sock| live_session(app, room, nick, sock))
@@ -1336,69 +1012,39 @@ async fn live_ws(State(app): St, h: HeaderMap, Query(q): Query<LiveQ>, ws: axum:
 async fn live_session(app: Arc<App>, room: String, nick: String, sock: axum::extract::ws::WebSocket) {
     use axum::extract::ws::Message;
     use futures_util::{SinkExt, StreamExt};
-    let client = format!("c{:x}", rand::random::<u32>());
-    let (mut rx, hello) = {
-        let mut hub = app.hub.lock().unwrap();
-        let r = hub.room(&room);
-        (r.tx.subscribe(), r.hello(now_ms()))
-    };
+    let client = format!("c{:032x}", rand::random::<u128>());
+    let handle = app.hub.room(&room);
+    let mut rx = handle.tx.subscribe();
     let (mut tx_ws, mut rx_ws) = sock.split();
-    let hello = format!("{{\"you\":\"{client}\",{}", &hello[1..]);
-    if tx_ws.send(Message::Text(hello.into())).await.is_err() {
-        return;
-    }
+    let hello = |raw: String| { let mut v: serde_json::Value = serde_json::from_str(&raw).unwrap_or_default(); v["you"] = serde_json::json!(client); v.to_string() };
+    if tx_ws.send(Message::Text(hello(handle.hello()).into())).await.is_err() { return; }
     eprintln!("[{}] live: viewer {client} ({nick}) joined room {room}", fmt_local(now_ms()));
-    let mut last_battle: Option<String> = None;
     loop {
         tokio::select! {
-            m = rx.recv() => match m {
-                Ok(s) => {
-                    // on battle change, resend the drawing set of the new battle
-                    if s.starts_with("{\"t\":") {
-                        if let Some(i) = s.find("\"battle\":") {
-                            let b: String = s[i + 9..].chars().take_while(|c| *c != ',').collect();
-                            if last_battle.as_deref() != Some(b.as_str()) {
-                                if last_battle.is_some() {
-                                    let h = { let mut hub = app.hub.lock().unwrap(); hub.room(&room).hello(now_ms()) };
-                                    if tx_ws.send(Message::Text(h.into())).await.is_err() { break; }
-                                }
-                                last_battle = Some(b);
-                            }
-                        }
-                    }
-                    if tx_ws.send(Message::Text(s.to_string().into())).await.is_err() { break; }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                Err(_) => break,
+            m = rx.recv() => {
+                let msg = match m { Ok(s) => s.to_string(), Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => hello(handle.hello()), Err(_) => break };
+                if tx_ws.send(Message::Text(msg.into())).await.is_err() { break; }
             },
             m = rx_ws.next() => match m {
                 Some(Ok(Message::Text(t))) => {
                     let Ok(v) = serde_json::from_str::<serde_json::Value>(t.as_str()) else { continue };
-                    match v["op"].as_str() {
-                        Some("ping") => {
-                            let r = serde_json::json!({"type": "pong", "c": v["c"], "server_ms": now_ms()}).to_string();
-                            if tx_ws.send(Message::Text(r.into())).await.is_err() { break; }
-                        }
-                        Some("put") | Some("del") => {
-                            let res = { app.hub.lock().unwrap().draw_op(&room, &v, &client, now_ms()) };
-                            if let Err(e) = res {
-                                let r = serde_json::json!({"type": "error", "error": e, "op": v["op"], "id": v["id"].as_str().or(v["d"]["id"].as_str())}).to_string();
-                                if tx_ws.send(Message::Text(r.into())).await.is_err() { break; }
-                                if e == "battle_changed" {
-                                    let h = { let mut hub = app.hub.lock().unwrap(); hub.room(&room).hello(now_ms()) };
-                                    if tx_ws.send(Message::Text(h.into())).await.is_err() { break; }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                    let response = match v["op"].as_str() {
+                        Some("ping") => Some(serde_json::json!({"type": "pong", "c": v["c"], "server_ms": now_ms()}).to_string()),
+                        Some("sync") => Some(hello(handle.hello())),
+                        Some("new_round") if v["protocol"].as_u64() == Some(2) => { handle.new_round().await; Some(hello(handle.hello())) },
+                        Some("put") | Some("del") => match handle.draw(v.clone(), client.clone()).await {
+                            Ok(ack) => Some(ack),
+                            Err(e) => Some(serde_json::json!({"type": "error", "error": if e == "upgrade_required" { "旧版网页无法提交标绘，请刷新页面升级" } else { &e }, "error_code": e, "read_only": e == "upgrade_required", "op_id": v["op_id"], "snapshot": serde_json::from_str::<serde_json::Value>(&hello(handle.hello())).ok()}).to_string()),
+                        },
+                        _ => None,
+                    };
+                    if let Some(s) = response { if tx_ws.send(Message::Text(s.into())).await.is_err() { break; } }
                 }
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                _ => {}
+                _ => {},
             },
         }
     }
-    eprintln!("[{}] live: viewer {client} left room {room}", fmt_local(now_ms()));
 }
 
 #[derive(Deserialize)]
@@ -1452,110 +1098,4 @@ async fn map_get(State(app): St, h: HeaderMap, AxPath(file): AxPath<String>, Que
         Ok(None) => (StatusCode::NOT_FOUND, [(header::CACHE_CONTROL, "no-store")], "not uploaded yet").into_response(),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
     }
-}
-
-#[derive(Deserialize)]
-struct ReplayReq {
-    session: String,
-    room: Option<String>,
-    speed: Option<f64>,
-    /// server ms window of the original recording
-    from_ms: Option<i64>,
-    to_ms: Option<i64>,
-    /// compress gaps > 5 s (hangar / loading) to 1.5 s (default true)
-    skip_idle: Option<bool>,
-}
-
-/// POST /api/replay (upload token): replay a recorded session from disk into the LIVE pipeline of a room
-/// (pseudo-collector "replay:<session>"; nothing is written to the data dir).
-async fn replay_start(State(app): St, h: HeaderMap, Json(q): Json<ReplayReq>) -> Response {
-    if !app.authed(&h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
-    let Some(room) = room_name(Some(q.room.as_deref().unwrap_or("test")), "test") else { return err(StatusCode::BAD_REQUEST, "bad room") };
-    let dirs = app.select_dirs(Some(&q.session), None);
-    let Some((sid, dir)) = dirs.into_iter().next() else { return err(StatusCode::NOT_FOUND, "no such session") };
-    let speed = q.speed.unwrap_or(1.0).clamp(0.1, 20.0);
-    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let key = format!("replay:{sid}");
-    if let Some(old) = app.replays.lock().unwrap().insert(key.clone(), stop.clone()) {
-        old.store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-    let player = std::fs::read(dir.join("session.json")).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()).and_then(|v| v["player"].as_str().map(|s| s.to_string())).unwrap_or_default();
-    let (from, to, skip) = (q.from_ms.unwrap_or(i64::MIN), q.to_ms.unwrap_or(i64::MAX), q.skip_idle.unwrap_or(true));
-    let app2 = app.clone();
-    let key2 = key.clone();
-    let room2 = room.clone();
-    tokio::spawn(async move {
-        let recs = match tokio::task::spawn_blocking(move || wtc_common::read_session(&dir)).await {
-            Ok(Ok(r)) => r,
-            _ => return,
-        };
-        let ts = |r: &Record| r.ts_server_ms.unwrap_or(r.wall_ms);
-        let recs: Vec<Record> = recs.into_iter().filter(|r| ts(r) >= from && ts(r) <= to && r.ep != "#label").collect();
-        eprintln!("[{}] replay {key2} -> room {room2}: {} records, speed {speed}", fmt_local(now_ms()), recs.len());
-        app2.hub.lock().unwrap().remove_col(&key2);
-        let start = now_ms();
-        let mut virt = 0f64; // replay-time ms elapsed (after idle compression)
-        let mut prev = recs.first().map(ts).unwrap_or(0);
-        let mut epoch_base: Option<u32> = None;
-        let mut i = 0;
-        while i < recs.len() {
-            if stop.load(std::sync::atomic::Ordering::SeqCst) {
-                break;
-            }
-            let now = now_ms();
-            let gap0 = (ts(&recs[i]) - prev).max(0) as f64;
-            let next_virt = virt + if skip && gap0 > 5000.0 { 1500.0 } else { gap0 };
-            let due = start + (next_virt / speed) as i64;
-            if due > now {
-                tokio::time::sleep(std::time::Duration::from_millis(((due - now) as u64).min(100))).await;
-                continue;
-            }
-            let mut hub = app2.hub.lock().unwrap();
-            let mut n = 0;
-            while i < recs.len() && n < 400 {
-                let r0 = &recs[i];
-                let gap = (ts(r0) - prev).max(0) as f64;
-                let step = if skip && gap > 5000.0 { 1500.0 } else { gap };
-                if start + ((virt + step) / speed) as i64 > now_ms() {
-                    break;
-                }
-                virt += step;
-                prev = ts(r0);
-                let mut r = r0.clone();
-                let t = now_ms();
-                r.ts_server_ms = Some(t);
-                r.wall_ms = t;
-                r.recv_ms = Some(t + 120);
-                let eb = *epoch_base.get_or_insert(r.epoch);
-                r.epoch = r.epoch.saturating_sub(eb) + 1 + ((start / 1000) % 1_000_000) as u32; // fresh battle per replay run
-                hub.feed(&key2, &player, Some(&room2), &r, t);
-                i += 1;
-                n += 1;
-            }
-        }
-        eprintln!("[{}] replay {key2} finished ({i} records)", fmt_local(now_ms()));
-        app2.replays.lock().unwrap().remove(&key2);
-    });
-    Json(serde_json::json!({"ok": true, "replay": key, "room": room, "speed": speed})).into_response()
-}
-
-#[derive(Deserialize)]
-struct ReplayStopReq {
-    session: Option<String>,
-}
-
-async fn replay_stop(State(app): St, h: HeaderMap, Json(q): Json<ReplayStopReq>) -> Response {
-    if !app.authed(&h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
-    let mut n = 0;
-    for (k, f) in app.replays.lock().unwrap().iter() {
-        if q.session.as_deref().map(|s| k.contains(s)).unwrap_or(true) {
-            f.store(true, std::sync::atomic::Ordering::SeqCst);
-            n += 1;
-        }
-    }
-    Json(serde_json::json!({"stopped": n})).into_response()
 }

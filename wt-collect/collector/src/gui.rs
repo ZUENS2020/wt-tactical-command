@@ -1,4 +1,4 @@
-//! WT 战术指挥 desktop client (1.0.0): native window (egui/eframe, OpenGL) without any data-labeling UI.
+//! WT 战术指挥 desktop client (2.0.0): native window (egui/eframe, OpenGL) without any data-labeling UI.
 //! Collection runs on the tokio runtime in the background; the window only shows state.
 //! Embedded app icon, system tray (show/hide/open map/exit, close-to-tray by default), native window placement
 //! restore, "打开战术地图" button ([gui] map_url), autostart (HKCU Run, starts hidden in the tray), single instance.
@@ -11,6 +11,25 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::watch;
+
+
+fn install_theme(ctx: &egui::Context) {
+    let palette: serde_json::Value = serde_json::from_str(include_str!("../../../shared/ui-theme.json")).unwrap();
+    let color = |key: &str| { let hex = palette[key].as_str().unwrap().trim_start_matches('#'); let n = u32::from_str_radix(hex, 16).unwrap(); Color32::from_rgb((n >> 16) as u8, (n >> 8) as u8, n as u8) };
+    let mut style = (*ctx.global_style()).clone();
+    style.wrap_mode = Some(egui::TextWrapMode::Wrap);
+    style.spacing.interact_size = egui::vec2(44.0, 44.0);
+    style.spacing.item_spacing = egui::vec2(10.0, 10.0);
+    style.visuals.panel_fill = color("background"); style.visuals.window_fill = color("panel");
+    style.visuals.override_text_color = Some(color("text"));
+    style.visuals.selection.bg_fill = color("accent");
+    style.visuals.window_corner_radius = egui::CornerRadius::ZERO;
+    for widget in [&mut style.visuals.widgets.noninteractive, &mut style.visuals.widgets.inactive, &mut style.visuals.widgets.hovered, &mut style.visuals.widgets.active, &mut style.visuals.widgets.open] {
+        widget.corner_radius = egui::CornerRadius::ZERO; widget.bg_fill = color("surface"); widget.weak_bg_fill = color("surface"); widget.bg_stroke = egui::Stroke::new(1.0, color("border"));
+    }
+    style.visuals.widgets.active.bg_fill = color("accent"); style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, color("accent"));
+    ctx.set_global_style(style);
+}
 
 // ---------------------------------------------------------------- persisted window settings
 
@@ -145,7 +164,7 @@ pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime, start_in_tray: bool) -> i
         .with_title(title)
         .with_app_id("wt-collector")
         .with_icon(egui::IconData { rgba: desktop::ICON64.to_vec(), width: 64, height: 64 })
-        .with_inner_size([st.w.unwrap_or(380.0).clamp(300.0, 1200.0), st.h.unwrap_or(430.0).clamp(300.0, 1400.0)])
+        .with_inner_size([st.w.unwrap_or(440.0).clamp(300.0, 1200.0), st.h.unwrap_or(480.0).clamp(300.0, 1400.0)])
         .with_min_inner_size([300.0, 300.0]);
     // logical position only as a fallback for old gui.json files without rect_px (non-Windows / first run)
     if let (Some(x), Some(y), None) = (st.x, st.y, st.rect_px) {
@@ -170,6 +189,7 @@ pub fn run_gui(cfg: Cfg, rt: &tokio::runtime::Runtime, start_in_tray: bool) -> i
             let font = install_fonts(&cc.egui_ctx, app_cfg.gui.font.as_deref());
             cc.egui_ctx.set_zoom_factor(app_cfg.gui.scale);
             cc.egui_ctx.set_theme(egui::Theme::Dark);
+            install_theme(&cc.egui_ctx);
             if font.is_none() {
                 crate::say!("[界面] 未找到中文字体（可在 [gui] font = \"C:\\\\Windows\\\\Fonts\\\\msyh.ttc\" 指定）");
             }
@@ -328,16 +348,17 @@ impl App {
 
     /// One-line overall state in plain Chinese (also used as the tray tooltip).
     fn summary_of(sh: &Shared) -> (String, Color32) {
-        let ok = Color32::from_rgb(90, 200, 110);
-        let warn = Color32::from_rgb(240, 180, 60);
-        let bad = Color32::from_rgb(235, 90, 80);
-        let g = sh.game.lock().unwrap().clone();
-        let paused = *sh.paused.lock().unwrap();
+        let ok = Color32::from_rgb(135, 148, 103);
+        let warn = Color32::from_rgb(191, 156, 50);
+        let bad = Color32::from_rgb(189, 81, 67);
+        let snapshot = sh.ui.borrow().clone();
+        let g = snapshot.game;
+        let paused = snapshot.paused;
         let (fail, has_ok) = {
-            let u = sh.up.lock().unwrap();
+            let u = &snapshot.up;
             (u.offline || !u.last_err.is_empty(), u.last_ok.is_some())
         };
-        if !sh.reachable() {
+        if !snapshot.reachable {
             return ("等待游戏：未检测到 War Thunder 本机接口（请启动游戏）".into(), warn);
         }
         if let Some((gate::Reason::GameDown, _)) = paused {
@@ -347,7 +368,7 @@ impl App {
             return ("待命：在机库中，进入对局后自动开始上传".into(), warn);
         }
         if fail {
-            return ("上传失败：请检查网络（数据只在内存中暂存约 10 秒）".into(), bad);
+            return ("上传断开：过期数据已丢弃，恢复后发送最新状态".into(), bad);
         }
         let in_battle = g.map_valid == Some(true) || g.player.is_some();
         if in_battle && has_ok {
@@ -361,19 +382,20 @@ impl App {
 
     /// Compact product status (5 rows). Raw numbers live in details_ui.
     fn status_ui(&self, ui: &mut egui::Ui, sh: &Shared) {
-        let ok = Color32::from_rgb(90, 200, 110);
-        let warn = Color32::from_rgb(240, 180, 60);
-        let bad = Color32::from_rgb(235, 90, 80);
-        let g = sh.game.lock().unwrap().clone();
-        let paused = *sh.paused.lock().unwrap();
-        let (fail, err, buf_ms, has_ok) = {
-            let u = sh.up.lock().unwrap();
+        let ok = Color32::from_rgb(135, 148, 103);
+        let warn = Color32::from_rgb(191, 156, 50);
+        let bad = Color32::from_rgb(189, 81, 67);
+        let snapshot = sh.ui.borrow().clone();
+        let g = snapshot.game;
+        let paused = snapshot.paused;
+        let (fail, err, _buf_ms, has_ok) = {
+            let u = &snapshot.up;
             (u.offline || !u.last_err.is_empty(), u.last_err.clone(), u.buf_age_ms, u.last_ok.is_some())
         };
-        let ck = sh.clock.lock().unwrap().clone();
-        egui::Grid::new("status").num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
+        let ck = snapshot.clock;
+        egui::Grid::new("status").max_col_width((ui.available_width() - 112.0).max(100.0)).num_columns(2).spacing([12.0, 5.0]).show(ui, |ui| {
             ui.label("游戏连接");
-            if sh.reachable() {
+            if snapshot.reachable {
                 ui.colored_label(ok, "已连接");
             } else {
                 ui.colored_label(warn, "未连接（请启动 War Thunder）");
@@ -405,7 +427,7 @@ impl App {
             } else if fail {
                 ui.colored_label(bad, if err.is_empty() { "失败：无法连接服务器".to_string() } else { format!("失败：{}", short_err(&err)) });
             } else if has_ok {
-                ui.colored_label(ok, format!("正常 · 延迟 {:.1} 秒", buf_ms as f64 / 1000.0));
+                ui.colored_label(ok, format!("正常 · 最近成功 {:.1} 秒前", snapshot.up.last_ok.map(|t| t.elapsed().as_secs_f64()).unwrap_or(0.0)));
             } else {
                 ui.label("连接中…");
             }
@@ -432,31 +454,35 @@ impl App {
 
     /// Technical details (collapsed by default).
     fn details_ui(&self, ui: &mut egui::Ui, sh: &Shared) {
-        let base = sh.base();
+        let snapshot = sh.ui.borrow().clone();
+        let base = snapshot.base;
         let up = {
-            let u = sh.up.lock().unwrap();
+            let u = &snapshot.up;
             (u.rate, u.pending + u.inflight, u.buf_age_ms, u.drop_too_old + u.drop_overflow + u.drop_no_sync, u.srv_too_old + u.srv_from_future + u.srv_no_sync + u.rejected, u.last_err.clone())
         };
-        let ck = sh.clock.lock().unwrap().clone();
-        let g = sh.game.lock().unwrap().clone();
+        let ck = snapshot.clock;
+        let g = snapshot.game;
         let small = |ui: &mut egui::Ui, t: String| {
             ui.label(RichText::new(t).size(12.0).weak());
         };
-        small(ui, format!("游戏接口：{}{}", crate::game::short(&base), if sh.reachable() { "" } else { "（无响应）" }));
+        small(ui, format!("游戏接口：{}{}", crate::game::short(&base), if snapshot.reachable { "" } else { "（无响应）" }));
         small(ui, format!("服务器：{}", self.cfg.server));
+        small(ui, format!("设备：{}", self.cfg.device_id));
         small(ui, format!("会话：{}", sh.session));
-        small(ui, format!("上传：{:.0} 条/秒 · 队列 {} · 缓冲 {:.1} 秒 · 本地丢弃 {} · 服务器拒收 {}", up.0, up.1, up.2 as f64 / 1000.0, up.3, up.4));
+        small(ui, "实时有效期：2 秒；网络恢复后只上传当前数据".into());
+        small(ui, format!("上传：{:.0} 条/秒 · 待发送 {} · 最新样本 {:.1} 秒 · 本地丢弃 {} · 服务器拒收 {}", up.0, up.1, up.2 as f64 / 1000.0, up.3, up.4));
         if !up.5.is_empty() {
             small(ui, format!("上传错误：{}", up.5));
         }
-        small(ui, format!("机库期间跳过的重复数据：{} 条", sh.suppressed.load(Ordering::Relaxed)));
+        small(ui, format!("机库期间跳过的重复数据：{} 条", snapshot.suppressed));
         small(ui, format!("时钟：偏差 {:+.0} ms · 往返 {:.0} ms{}", ck.offset_ms, ck.rtt_ms, if ck.last_err.is_empty() { String::new() } else { format!(" · {}", ck.last_err) }));
         small(ui, format!("地图对象 {} · 敌方标记 {}", g.objects, g.enemies));
         if let Some(f) = &self.font {
             small(ui, format!("字体：{f}"));
         }
         egui::ScrollArea::vertical().max_height(130.0).stick_to_bottom(true).show(ui, |ui| {
-            for l in crate::LOG.lock().unwrap().iter().rev().take(60).collect::<Vec<_>>().into_iter().rev() {
+            let lines = crate::LOG.try_lock().map(|log| log.iter().rev().take(60).cloned().collect::<Vec<_>>()).unwrap_or_default();
+            for l in lines.into_iter().rev() {
                 ui.label(RichText::new(l).monospace().size(11.0));
             }
         });
@@ -565,14 +591,7 @@ impl eframe::App for App {
             if self.exiting.is_none() {
                 self.save_now();
             }
-            let pend = self.sh.as_ref().map(|s| s.labels.lock().unwrap().pending()).unwrap_or(0);
-            let t = *self.exiting.get_or_insert_with(Instant::now);
-            // wait (max 3 s) for pending labels before closing
-            if pend == 0 || t.elapsed() > Duration::from_secs(3) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else if close_req {
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
         egui::CentralPanel::default_margins().show(ui, |ui| {
@@ -584,7 +603,7 @@ impl eframe::App for App {
                 });
             });
             if let Some(e) = &self.collector_err {
-                ui.colored_label(Color32::from_rgb(235, 90, 80), e);
+                ui.colored_label(Color32::from_rgb(189, 81, 67), e);
             }
             let sh = self.sh.clone();
             match &sh {
@@ -600,7 +619,7 @@ impl eframe::App for App {
                 }
             }
             ui.add_space(6.0);
-            let map_btn = egui::Button::new(RichText::new("打开战术地图").size(20.0).strong().color(Color32::WHITE)).fill(Color32::from_rgb(30, 90, 160));
+            let map_btn = egui::Button::new(RichText::new("打开战术地图").size(18.0).color(Color32::from_rgb(24, 28, 24))).fill(Color32::from_rgb(135, 148, 103));
             if ui.add_sized([ui.available_width(), 56.0], map_btn).on_hover_text(format!("在浏览器中打开 {}", self.cfg.gui.map_url)).clicked_by(egui::PointerButton::Primary) {
                 self.open_map();
             }
@@ -616,6 +635,7 @@ impl eframe::App for App {
             }
             ui.add_space(6.0);
             ui.separator();
+            egui::CollapsingHeader::new("窗口设置").default_open(false).show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(mut on) = self.autostart {
                     if ui.checkbox(&mut on, "开机自启").on_hover_text("登录 Windows 后自动在托盘中启动").changed() {
@@ -625,7 +645,7 @@ impl eframe::App for App {
                                 let t = if on { "已开启开机自启（启动后在托盘中）" } else { "已关闭开机自启" };
                                 self.flash = Some(Flash { text: t.into(), at: Instant::now(), color: Color32::from_rgb(120, 170, 230) });
                             }
-                            Err(e) => self.flash = Some(Flash { text: e, at: Instant::now(), color: Color32::from_rgb(235, 90, 80) }),
+                            Err(e) => self.flash = Some(Flash { text: e, at: Instant::now(), color: Color32::from_rgb(189, 81, 67) }),
                         }
                     }
                 }
@@ -633,14 +653,15 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(if self.on_top { egui::WindowLevel::AlwaysOnTop } else { egui::WindowLevel::Normal }));
                 }
             });
+            });
             let mut hide = false;
             ui.horizontal(|ui| {
                 let w = (ui.available_width() - 8.0) / 2.0;
                 let hide_txt = if self.tray.is_some() { "隐藏到托盘" } else { "最小化" };
-                if ui.add_sized([w, 30.0], egui::Button::new(hide_txt)).on_hover_text("窗口隐藏，后台继续采集").clicked() {
+                if ui.add_sized([w, 44.0], egui::Button::new(hide_txt)).on_hover_text("窗口隐藏，后台继续采集").clicked() {
                     hide = true;
                 }
-                if ui.add_sized([w, 30.0], egui::Button::new("退出")).on_hover_text("停止采集并退出").clicked() {
+                if ui.add_sized([w, 44.0], egui::Button::new("退出")).on_hover_text("停止采集并退出").clicked() {
                     self.ask_close = true;
                 }
             });
@@ -653,7 +674,7 @@ impl eframe::App for App {
             }
             ui.add_space(4.0);
             if let Some(sh) = &sh {
-                egui::CollapsingHeader::new(RichText::new("详情").size(12.0).weak()).id_salt("details").default_open(false).show(ui, |ui| {
+                egui::CollapsingHeader::new(RichText::new("诊断详情").size(12.0).weak()).id_salt("details").default_open(false).show(ui, |ui| {
                     self.details_ui(ui, sh);
                 });
             }

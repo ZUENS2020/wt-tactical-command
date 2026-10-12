@@ -113,6 +113,10 @@ impl Markers {
 
     /// Feed one stored record (in seq order).
     pub fn feed(&mut self, r: &Record) {
+        let parsed = r.body.as_deref().and_then(|b| serde_json::from_str::<Value>(b).ok());
+        self.feed_parsed(r, parsed.as_ref());
+    }
+    pub fn feed_parsed(&mut self, r: &Record, parsed: Option<&Value>) {
         if r.status != 200 || r.err.is_some() || r.dropped.is_some() {
             return;
         }
@@ -120,10 +124,10 @@ impl Markers {
         if t < self.last_t - 2000 {
             return; // backlog / out of order: live derivation only
         }
-        let Some(b) = r.body.as_deref() else { return };
+        let Some(v) = parsed else { return };
         match r.ep.as_str() {
             "/map_info.json" => {
-                if let Ok(v) = serde_json::from_str::<Value>(b) {
+                if !v.is_null() {
                     if let Some(g) = GridInfo::from_map_info(&v) {
                         self.span = Some([g.map_max[0] - g.map_min[0], g.map_max[1] - g.map_min[1]]);
                         self.grid = Some(g);
@@ -131,17 +135,17 @@ impl Markers {
                 }
             }
             "/map_obj.json" => {
-                if let Ok(Value::Array(a)) = serde_json::from_str::<Value>(b) {
+                if let Value::Array(a) = v {
                     self.last_t = self.last_t.max(t);
                     self.frame(t, &a);
                     self.flush(t, false);
                 }
             }
             "/gamechat" => {
-                if let Ok(Value::Array(a)) = serde_json::from_str::<Value>(b) {
+                if let Value::Array(a) = v {
                     let first = self.chat_epochs.insert(r.epoch);
                     let backlog = first && r.url.contains("lastId=0");
-                    for m in &a {
+                    for m in a {
                         let id = m["id"].as_i64().unwrap_or(-1);
                         if !self.chat_seen.insert(id) {
                             continue;
@@ -528,6 +532,7 @@ mod tests {
     #[test]
     fn own_ping_without_grid_and_marker_objects() {
         let mut m = Markers::default();
+        m.own = Some("传奇耐摔王无声铃鹿".into());
         m.feed(&rec(1, "/map_info.json", 0, MI));
         for i in 0..40i64 {
             let t = 1000 + i * 100;

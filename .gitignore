@@ -60,3 +60,7 @@ id_ed25519*
 *.bak
 *.tmp
 .DS_Store
+
+# Local UI and load-test evidence
+/shots/
+/web-proto/shots/

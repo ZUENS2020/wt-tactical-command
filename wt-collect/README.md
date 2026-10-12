@@ -1,51 +1,29 @@
-# wt-collect — real-game 8111 test data pipeline
+# WT 战术指挥：实时采集端与服务端
 
-```
-Windows PC (shengyuan-zhang)                         nec-manager-box (100.94.249.78)
-wt-collector.exe --127.0.0.1:8111 (game)            wt-receiver 0.0.0.0:18111 (tailnet only)
-   raw samples -> gzip batches /250ms --Tailscale-->  data/<date>/<session>/samples-NNNN.jsonl.gz
-   map.img by sha256 -------------------------------> data/<date>/<session>/images/<hash>.png|jpg
-   local JSONL copy + spool (never lose data)         wt-analyze <session> -> <session>/report/*.md,*.csv
-```
+当前版本采用最新值同步：Windows 采集端 → HTTPS gzip 上传 → 每房间状态任务 → WebSocket → Canvas 战术地图。
 
-| path | what |
+- 实时观测硬期限为 2 秒，失败样本、重复、乱序与旧会话样本直接丢弃。没有本地观测文件、断线补传、原始观测归档或复盘。
+- 地图图片走独立有界上传通道；静态图片缓存、地图元数据和当前房间标绘保留。既有历史数据仍可用离线分析工具读取。
+- Windows 采集端版本为 2.0.0；身份来自本机持久化 `device-id`，每次进程启动使用新的随机会话。安装包没有固定玩家身份。
+- 实时协议和部署说明见仓库 `docs/REALTIME_V2.md`；验收记录见 `docs/ACCEPTANCE_V2.md`。
+
+| 路径 | 用途 |
 |---|---|
-| `collector/` | wt-collector (Rust, tokio+reqwest, plain HTTP, no TLS). `cargo build --release -p wt-collector --target x86_64-pc-windows-gnu` |
-| `receiver/` | wt-receiver (axum). Env in `receiver.env` (token, bind, data dir, size guard) |
-| `analyzer/` | wt-analyze |
-| `common/` | shared `Record` / `Batch` format + readers |
-| `mock/mock8111.py` | SYNTHETIC 8111 mock (ground / ground→air / dead / respawn / air RB loop) |
-| `scripts/receiverctl.sh` | `start|stop|restart|status|install-binary` (supervisor with auto-restart) |
-| `scripts/e2e-mock.sh` | end-to-end test: mock → collector → receiver (with outage) → analyzer |
-| `dist/wt-collector-win64.zip` | Windows package 0.2.0 (exe + toml with token + Chinese README + cli-run.bat); previous: `dist/wt-collector-win64-0.1.5.zip` |
-| `bin/` | installed binaries used by the supervisor / analyzer |
-| `test/e2e-sessions/` | mock test sessions (synthetic; moved out of data/) |
+| collector/ | Windows 原生中文窗口、后台采样、时钟校准、最新值上传 |
+| receiver/ | 2 秒有效期、地图上下文、身份融合、房间任务及共享标绘版本校验 |
+| common/ | 上传协议和历史文件读取工具 |
+| analyzer/ | 仅用于既有历史数据的离线分析 |
+| deploy/package.sh | 可在任意工作目录打包，支持 MSVC 或 GNU exe |
 
-## Record format (one JSON line per request)
-`session, seq, ep, url, wall_ms, mono_ns, lat_us, status, err?, ctype?, bytes, body? (raw, exact), body_b64?, img_hash?, changed, cfg_hz, epoch`.
-Synthetic records: `#meta` (collector config), `#note` (labels). Receiver de-dups by (session, seq) via `seq.idx`.
-API notes go to `notes.jsonl`.
+构建：`cargo build --release -p wt-collector`（Windows），`cargo build --release -p wt-receiver`（Linux）。
+测试：`cargo test --workspace`。网页及多人故障脚本在 `web-proto/tools/`。
 
-## Receiver API
-- `GET /` live status page (2 s refresh), `GET /api/status` JSON, `GET /healthz`
-- `POST /api/ingest` (Bearer token, gzip JSON `Batch`), `POST /api/image?session=&hash=&ctype=` (raw bytes, sha256 verified)
-- `POST /api/note` `{"text": "...", "session"?: "...", "player"?: "..."}` → latest session of that player if no session given
-  `curl -H "Authorization: Bearer $WT_TOKEN" -H 'Content-Type: application/json' -d '{"text":"color-blind on"}' http://100.94.249.78:18111/api/note`
-- Size guard: 507 when disk free < WT_MIN_FREE_GB (5) or data dir > WT_MAX_GB (30). Collector then spools locally.
+当前接口：`GET /api/time`、`POST /api/ingest`、`POST /api/image`、`GET /api/live`、`GET /api/map/{file}`。
+旧的 `POST /api/note`、`POST /api/label`、`POST /api/replay` 返回 410。
 
-## Analyzer
-`bin/wt-analyze <session-id | id-prefix | dir | latest> [--out DIR]` → `report.md` + CSVs (endpoints, map_obj_motion,
-objects, colors_by_note_segment, map_generations, transitions, frame_switches, player_intervals, ids, mission, segments, bandwidth).
+## 旧版本实现记录
 
-## Naval filter (receiver, since 2026-10-10)
-All ship/naval info is removed in the receiver ingest path before writing (receiver/src/naval.rs):
-- /map_obj.json: objects with icon (case-insensitive exact) in WT_NAVAL_ICONS (default list in naval.rs) or
-  type containing any of WT_NAVAL_TYPE_SUBSTR (ship,boat,naval) are dropped; kept objects are copied byte-for-byte;
-  record gets `filtered_naval: N`, `bytes`/`changed` recomputed. Extend with WT_NAVAL_ICONS_EXTRA in receiver.env.
-- /indicators, /state: when own vehicle is naval (indicators army ship/boat/naval or type shipModels/…ship…/boat…,
-  or the Player map object is naval) content is removed: record kept as placeholder with `dropped: "naval"`.
-- Unknown icons/types (not in the known list) are counted in data/unknown_icons.json (flushed every 10 s).
-- Retro pass: `WT_DATA=… bin/wt-receiver filter-existing` (receiver stopped). Backup: backup-pre-naval-filter.tar.gz.
+下文保留为历史资料；其中的归档、补传、标签写入和旧期限规则不适用于 2.0.0 的实时运行路径。
 
 ## 0.1.5: no local storage + clock guard
 - Collector writes no files (no JSONL copy, no spool, no images); bounded in-memory buffer (10 s / 8 MB), drops oldest.

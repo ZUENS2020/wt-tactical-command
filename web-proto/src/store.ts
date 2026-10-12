@@ -28,6 +28,7 @@ export interface Drawing {
   by: string;
   scope: Scope;
   v: number;                 // local edit counter
+  map_context?: string;
   sv?: number;               // server receive time of the last write (live)
 }
 
@@ -41,6 +42,9 @@ export interface State {
   mode: ViewMode;
   lastSingle: MapId;
   density: Density;
+  activeMap: MapId;
+  panelOpen: boolean;
+  selectedUnit: string | null;
   tool: Tool;
   pointCat: PointCat;
   routeType: RouteType;
@@ -73,7 +77,7 @@ const LS_KEY = DEMO ? 'wt-tactical-proto-v1' : 'wt-tactical-live-v1';
 
 function initial(): State {
   const base: State = {
-    mode: 'ground', lastSingle: 'ground', density: 'command', tool: 'select',
+    mode: 'ground', lastSingle: 'ground', density: 'command', activeMap: 'ground', panelOpen: false, selectedUnit: null, tool: 'select',
     pointCat: 'rally', routeType: 'route', areaType: 'airstrike', areaShape: 'rect', sourceSector: 30,
     newStatus: 'present', smooth: false, freePan: true,
     drawings: [], selectedId: null, moving: false, draft: null, ruler: null, rulerSpeed: 30, hover: null,
@@ -100,6 +104,7 @@ function initial(): State {
   const pol = q.get('policy'); if (pol === 'off' || pol === 'team_visible' || pol === 'fused') base.policy = pol;
   if (q.get('fresh') === '1') { base.drawings = []; base.views = { ground: null, air: null }; }
   if (q.get('collab') === '0') base.collab = false;
+  base.activeMap = base.mode === 'dual' ? base.lastSingle : base.mode;
   return base;
 }
 
@@ -134,5 +139,4 @@ export function toast(text: string, opts: { undo?: boolean; tone?: Toast['tone']
   window.setTimeout(() => setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) })), opts.undo ? 4200 : 2800);
 }
 
-let idSeq = Date.now() % 100000;
-export function newId() { return 'ann-' + (idSeq++).toString(36); }
+export function newId() { return crypto.randomUUID(); }

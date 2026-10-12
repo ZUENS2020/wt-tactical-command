@@ -114,7 +114,7 @@ pub async fn initial(cfg: &Cfg, sh: &Shared) -> Result<Sample, String> {
 }
 
 /// Periodic re-sync; emits a "#clock" record per burst and the session "#meta" on the first success.
-pub async fn sync_loop(cfg: Cfg, sh: Arc<Shared>, tx: mpsc::UnboundedSender<Record>, mut meta: Option<String>, mut stop: watch::Receiver<bool>) {
+pub async fn sync_loop(cfg: Cfg, sh: Arc<Shared>, tx: mpsc::Sender<Record>, mut meta: Option<String>, mut stop: watch::Receiver<bool>) {
     let client = time_client();
     let mut first_round = true;
     loop {
@@ -140,9 +140,9 @@ pub async fn sync_loop(cfg: Cfg, sh: Arc<Shared>, tx: mpsc::UnboundedSender<Reco
                     "samples": all,
                 });
                 if let Some(m) = meta.take() {
-                    let _ = tx.send(sh.synthetic("#meta", m));
+                    let _ = tx.try_send(sh.synthetic("#meta", m));
                 }
-                let _ = tx.send(sh.synthetic("#clock", body.to_string()));
+                let _ = tx.try_send(sh.synthetic("#clock", body.to_string()));
             }
             Err(e) => {
                 let mut c = sh.clock.lock().unwrap();

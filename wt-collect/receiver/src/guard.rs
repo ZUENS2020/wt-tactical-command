@@ -20,7 +20,7 @@ pub struct GuardCfg {
 
 impl GuardCfg {
     pub fn from_env() -> Self {
-        let max_skew_ms = std::env::var("WT_MAX_SKEW_MS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(3000);
+        let max_skew_ms = std::env::var("WT_MAX_SKEW_MS").ok().and_then(|v| v.trim().parse().ok()).unwrap_or(wtc_common::LIVE_MAX_AGE_MS);
         let legacy = match std::env::var("WT_ACCEPT_LEGACY").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
             "on" | "1" | "true" | "yes" => Legacy::On,
             "off" | "0" | "false" | "no" => Legacy::Off,
@@ -56,6 +56,7 @@ pub fn batch_mode(cfg: &GuardCfg, b: &Batch) -> Mode {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, PartialEq)]
 pub enum Verdict {
     Accept,
@@ -64,6 +65,7 @@ pub enum Verdict {
 }
 
 /// late = recv - ts (positive = record is in the past)
+#[cfg(test)]
 pub fn verdict(cfg: &GuardCfg, ts_server_ms: i64, recv_ms: i64) -> Verdict {
     let late = recv_ms - ts_server_ms;
     if late > cfg.max_skew_ms {
@@ -144,7 +146,7 @@ impl GuardStats {
 mod tests {
     use super::*;
     fn b(version: &str, clock: Option<ClockInfo>) -> Batch {
-        Batch { session: "s".into(), player: "p".into(), version: version.into(), clock, records: vec![] }
+        Batch { device_id: String::new(), nickname: String::new(), session: "s".into(), player: "p".into(), version: version.into(), clock, records: vec![] }
     }
     #[test]
     fn modes() {

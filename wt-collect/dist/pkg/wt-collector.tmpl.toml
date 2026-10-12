@@ -2,7 +2,8 @@
 server = "{SERVER}"
 token = "CHANGE_ME_WT_TOKEN"
 # 玩家 ID（显示在窗口里和战术地图上）
-player = "shengyuan"
+
+# player defaults to the Windows account name; device identity is generated on first launch.
 
 # 游戏网页接口端口："auto" = 自动查找（8111 / 9222）。一般不用改。
 game_port = "auto"
@@ -22,5 +23,5 @@ map_url = "https://wt.zuens2020.top/"   # “打开战术地图”打开的网�
 on_close = "tray"        # 点窗口右上角 ×："tray" 隐藏到托盘继续运行 / "ask" 询问 / "exit" 直接退出
 always_on_top = false    # 窗口置顶（窗口里也可以切换，会记住）
 scale = 1.0              # 界面缩放，例如 1.25
-nickname = "传奇耐摔王无声铃鹿"   # 在窗口里显示的游戏昵称（可选）
+nickname = ""   # 在窗口里显示的游戏昵称（可选）
 # font = "C:\\Windows\\Fonts\\msyh.ttc"   # 中文字体（默认自动使用微软雅黑）

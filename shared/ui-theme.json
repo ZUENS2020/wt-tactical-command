@@ -1,0 +1,16 @@
+{
+  "background": "#181c18",
+  "panel": "#242a24",
+  "surface": "#30372e",
+  "border": "#59634f",
+  "accent": "#879467",
+  "text": "#e8eade",
+  "muted": "#aab19f",
+  "friend": "#4787b4",
+  "squad": "#688a47",
+  "self": "#bf9c32",
+  "enemy": "#bd5143",
+  "order": "#ab7730",
+  "recon": "#477c80",
+  "mapPaper": "#deded1"
+}

@@ -14,6 +14,8 @@ export interface MapCfg {
   /** live: a map of this kind is known for the current battle */
   available: boolean;
   hash: string | null;
+  context?: string;
+  gen?: string;
 }
 
 export const MAPS: Record<MapId, MapCfg> = {
@@ -31,32 +33,13 @@ export const MAPS: Record<MapId, MapCfg> = {
   },
 };
 
-// Canonical world for drawings = ground-map normalized coords × 4096 (m, y down).
-// Ground→air transform is MOCKED (the two real captures are different missions):
-// air_norm = A + K * ground_norm   (server would fit this by least squares, plan §5.3)
-const K = 0.1875;
-const A: V2 = [0.574, 0.39];
+// Each map has its own normalized coordinate space; ground and air never transform into each other.
 export const CANON = 4096;
-
-/** live mode: each map has its own canonical space (norm × 4096); no ground→air transform is known */
-let SEPARATE = false;
-export function setSeparateMaps(v: boolean) { SEPARATE = v; }
-export function separateMaps() { return SEPARATE; }
-
-export function canonToNorm(map: MapId, w: V2): V2 {
-  const gx = w[0] / CANON, gy = w[1] / CANON;
-  if (map === 'ground' || SEPARATE) return [gx, gy];
-  return [A[0] + K * gx, A[1] + K * gy];
-}
-export function normToCanon(map: MapId, n: V2): V2 {
-  if (map === 'ground' || SEPARATE) return [n[0] * CANON, n[1] * CANON];
-  return [((n[0] - A[0]) / K) * CANON, ((n[1] - A[1]) / K) * CANON];
-}
-/** metres per canonical unit when measured on the given map */
-export function metersPerCanon(map: MapId) {
-  if (SEPARATE) return (MAPS[map].max[0] - MAPS[map].min[0]) / CANON;
-  return map === 'ground' ? 1 : (K * 131072) / CANON;
-}
+export function setSeparateMaps(_value: boolean) {}
+export function separateMaps() { return true; }
+export function canonToNorm(_map: MapId, w: V2): V2 { return [w[0] / CANON, w[1] / CANON]; }
+export function normToCanon(_map: MapId, n: V2): V2 { return [n[0] * CANON, n[1] * CANON]; }
+export function metersPerCanon(map: MapId) { return (MAPS[map].max[0] - MAPS[map].min[0]) / CANON; }
 export function metersPerNorm(map: MapId) {
   const c = MAPS[map];
   return c.max[0] - c.min[0];
